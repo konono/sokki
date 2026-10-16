@@ -1,0 +1,87 @@
+# sokki 設定ファイルのサンプル
+#
+# 使い方:
+#   1. このファイルをコピーする
+#        mkdir -p ~/.config/sokki
+#        cp sokki.example.yaml ~/.config/sokki/config.yaml
+#   2. capture.device を自分の環境のデバイス名に書き換える
+#        ./bin/sokki list   # 正確な名前を確認する (設定が壊れていても動きます)
+#
+# 任意の場所に置いた設定を使う場合:
+#   ./bin/sokki --config /path/to/config.yaml
+#
+# 優先順位: 明示した CLI フラグ > この設定ファイル > 既定値
+#
+# 次はすべてエラーになります (設定ミスを黙って無視しないため):
+#   - 未知のキー / 重複したキー / 値の型の誤り
+#   - 空欄 (例: device: "" や device:)  ← 既定値へは戻しません
+#   - 複数の YAML 文書 (--- 区切り)
+# 使わない項目は、空欄にするのではなく行ごと削除してください。
+# (transcription.model だけは空欄 "" を「既定の探索順」として許可します)
+
+capture:
+  # 取り込み方式。現在は "device" (macOS の音声入力デバイス) のみ。
+  type: device
+
+  # 入力デバイス名。`sokki list` で表示される名前を正確に指定する。
+  #
+  # 例:
+  #   "Conference Output"   Loopback の既定の仮想デバイス
+  #   "社内会議キャプチャ"     名前を変えた Loopback デバイス
+  #   "BlackHole 2ch"       無料の BlackHole (Loopback を持っていない場合)
+  device: "Conference Output"
+
+transcription:
+  # 認識する言語。空欄にはできません (使わないなら行ごと削除)。
+  #   ja    日本語のみ (既定・日本語会議で最も安定)
+  #   en    英語のみ
+  #   auto  区間ごとに自動判定 (日英が混ざる会議向け)
+  #
+  # auto の制限:
+  #   - 言語判定は無音で区切られた区間ごとに行われます。1 つの区間の中で
+  #     言語が切り替わる場合 (間を置かずに日本語→英語と話した場合など) は、
+  #     片方の言語だけが出力されることがあります。
+  #   - 発話中の暫定表示は約 1 秒の短い音声を認識するため、auto では
+  #     言語判定が不安定になりがちです。確定時に区間全体を認識し直すので、
+  #     保存される内容の方が安定します。
+  language: ja
+
+  # ggml モデルのパス。
+  # 空 ("") にすると既定の探索順を使います:
+  #   1. ~/Library/Application Support/superwhisper/ggml-large-v3-turbo.bin
+  #   2. ~/.local/share/talknote/models/ggml-large-v3-turbo.bin
+  #
+  # どちらも無い場合は、無料のモデルを入手してここに絶対パスで指定します
+  # (入手先は README「モデルを持っていない場合」を参照)。
+  #   例: model: "/Users/you/models/ggml-large-v3-turbo.bin"
+  model: ""
+
+summary:
+  # 会議ボードを発言から自動更新するか。
+  # MCP (start_or_attach) 起点の録音は既定で有効、手動実行は既定で無効。
+  enabled: false
+
+  # 要約に使う AI。プリセットは現在 "claude" のみ。
+  provider: claude
+
+  # モデル (省略時は CLI の既定)。
+  model: ""
+
+  # 任意のコマンドを使う場合は配列で指定する (provider より優先)。
+  # 会議の発言は外部入力なので、ツールを無効にした実行形にすること。
+  #   command: ["codex", "exec", "--sandbox", "read-only", "-"]
+  # command: []
+
+  # 更新のきっかけ: min_interval 以上空いていて min_new_lines 以上たまったら。
+  # 未処理があれば遅くとも max_interval で更新する。
+  min_new_lines: 3
+  min_interval: 30s
+  max_interval: 60s
+
+  # 要約本文の目安上限 (文字数)。
+  max_chars: 2000
+
+output:
+  # 文字起こしの保存先ディレクトリ。
+  # この下に YYYY-MM-DD_HHMMSS.txt が会議ごとに作られます。
+  directory: transcripts

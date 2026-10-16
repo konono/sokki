@@ -1,0 +1,15 @@
+bin/
+transcripts/
+.panecom/
+.DS_Store
+.env
+
+# Local planning and review notes
+AI_INTEGRATION_PLAN.md
+AUTO_SUMMARY_DESIGN.md
+BOARD_VIEW_PLAN.md
+CONFIG_PLAN.md
+PLAN.md
+REALTIME_PLAN.md
+REVIEW.md
+SUMMARY_PLAN.md
