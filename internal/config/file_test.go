@@ -835,8 +835,8 @@ func TestSummaryDefaultsWhenNothingGiven(t *testing.T) {
 	if got.AutoSummary {
 		t.Error("既定で自動要約が有効")
 	}
-	if got.SummaryMinLines != 3 || got.SummaryMinWait != 30*time.Second {
-		t.Errorf("既定値が違う: %d / %v", got.SummaryMinLines, got.SummaryMinWait)
+	if got.SummaryMinLines != 8 || got.SummaryMinWait != 90*time.Second || got.SummaryMaxWait != 180*time.Second {
+		t.Errorf("既定値が違う: %d / %v / %v", got.SummaryMinLines, got.SummaryMinWait, got.SummaryMaxWait)
 	}
 }
 

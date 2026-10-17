@@ -47,6 +47,7 @@ type Split struct {
 	// 会議ボード。
 	boardRaw     []string
 	boardWrap    wrapped
+	boardTopic   string
 	boardVersion int
 	autoSummary  bool
 
@@ -186,11 +187,15 @@ func (s *Split) Resize(rows, cols int) {
 	boardAnchor := s.boardWrap.ownerAt(s.boardView.top)
 
 	widthChanged := cols != s.cols
+	_, oldBoardH := s.layout()
 	s.setSize(rows, cols)
+	_, newBoardH := s.layout()
 	if widthChanged {
 		s.rebuildLogEnds()
-		s.boardWrap = wrapLines(s.boardRaw, s.cols)
 		s.logView.top = s.logRowOf(logAnchor)
+	}
+	if widthChanged || (oldBoardH >= 3) != (newBoardH >= 3) {
+		s.rebuildBoardWrap()
 		s.boardView.top = s.boardWrap.firstRowOf(boardAnchor)
 	}
 	s.frame = nil // 行が動くので全行描き直す
@@ -251,11 +256,28 @@ func (s *Split) SetBoard(lines []string) {
 	defer s.mu.Unlock()
 	anchor := s.boardWrap.ownerAt(s.boardView.top)
 	s.boardRaw = lines
-	s.boardWrap = wrapLines(lines, s.cols)
+	s.boardTopic = ""
+	if len(lines) > 0 {
+		if topic, ok := strings.CutPrefix(strings.TrimSpace(lines[0]), "今の話題:"); ok {
+			s.boardTopic = strings.TrimSpace(topic)
+		}
+	}
+	s.rebuildBoardWrap()
 	if !s.boardView.follow {
 		s.boardView.top = s.boardWrap.firstRowOf(anchor)
 	}
 	s.render()
+}
+
+// rebuildBoardWrap は固定表示できる話題を本文から除き、重複表示を防ぐ。
+// 小さな端末では固定行を置けないため、話題を本文に残す。
+func (s *Split) rebuildBoardWrap() {
+	lines := s.boardRaw
+	_, boardH := s.layout()
+	if s.boardTopic != "" && boardH >= 3 && len(lines) > 0 {
+		lines = lines[1:]
+	}
+	s.boardWrap = wrapLines(lines, s.cols)
 }
 
 // --- 操作 ---
@@ -350,10 +372,19 @@ func (s *Split) focusedBodyHeight() int {
 	logH, boardH := s.layout()
 	h := logH - 1
 	if s.focus == focusBoard {
-		h = boardH - 1
+		h = s.boardBodyHeight(boardH)
 	}
 	if h < 1 {
 		h = 1
+	}
+	return h
+}
+
+// boardBodyHeight は見出しと、表示可能なら固定の「今の話題」を除いた高さ。
+func (s *Split) boardBodyHeight(boardH int) int {
+	h := boardH - 1
+	if s.boardTopic != "" && h >= 2 {
+		h--
 	}
 	return h
 }
@@ -459,7 +490,7 @@ func (s *Split) buildFrame() []frameRow {
 	if logBody < 0 {
 		logBody = 0
 	}
-	boardBody := boardH - 1
+	boardBody := s.boardBodyHeight(boardH)
 	if boardBody < 0 {
 		boardBody = 0
 	}
@@ -478,6 +509,10 @@ func (s *Split) buildFrame() []frameRow {
 	if boardH > 0 {
 		frame = append(frame, frameRow{
 			text: s.header(focusBoard, len(s.boardWrap.rows), boardBody), dim: true})
+		if s.boardTopic != "" && boardH >= 3 {
+			frame = append(frame, frameRow{
+				text: truncateToWidth(" 今の話題: "+s.boardTopic, s.cols), dim: true})
+		}
 		frame = append(frame, s.bodyRows(s.boardWrap.rows, s.boardView, boardBody)...)
 	}
 	for len(frame) < s.rows {

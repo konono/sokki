@@ -135,6 +135,48 @@ func testConfig() Config {
 
 // --- トリガー ---
 
+func TestDefaultSummaryCadence(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MinNewLines != 8 || cfg.MinInterval != 90*time.Second || cfg.MaxInterval != 180*time.Second {
+		t.Fatalf("既定の更新条件 = %d / %v / %v", cfg.MinNewLines, cfg.MinInterval, cfg.MaxInterval)
+	}
+}
+
+func TestFirstSummaryWaitsForThreeLinesEvenAfterMaxInterval(t *testing.T) {
+	src := &fakeSource{}
+	w := New(src, &fakeProvider{}, DefaultConfig())
+	now := time.Now()
+	w.now = func() time.Time { return now }
+	w.lastRun = now.Add(-4 * time.Minute)
+	for n := 1; n <= 3; n++ {
+		src.addLines(1)
+		if got, want := w.shouldRun(), n == 3; got != want {
+			t.Errorf("初回 %d 行で shouldRun = %v, want %v", n, got, want)
+		}
+	}
+}
+
+func TestSummaryRunsAtEightLinesOrMaximumWait(t *testing.T) {
+	now := time.Now()
+	src := &fakeSource{version: 1}
+	src.addLines(7)
+	w := New(src, &fakeProvider{}, DefaultConfig())
+	w.now = func() time.Time { return now }
+	w.lastRun = now.Add(-90 * time.Second)
+	if w.shouldRun() {
+		t.Fatal("90 秒で 7 行しかないのに更新した")
+	}
+	src.addLines(1)
+	if !w.shouldRun() {
+		t.Fatal("90 秒で 8 行たまっても更新しない")
+	}
+	w.lastRun = now.Add(-180 * time.Second)
+	src.applied = 7
+	if !w.shouldRun() {
+		t.Fatal("最大 180 秒を過ぎても未処理 1 行を更新しない")
+	}
+}
+
 // 新しい発言が無ければ AI を呼ばないこと。
 func TestNoCallWithoutNewLines(t *testing.T) {
 	src := &fakeSource{}
@@ -178,7 +220,7 @@ func TestRunsWhenEnoughNewLines(t *testing.T) {
 	}
 }
 
-// 行数が足りなくても一定時間で呼ぶこと。
+// 初回に最低限の文脈があれば、通常の行数に届かなくても最大待ち時間で呼ぶこと。
 func TestRunsAfterMaxInterval(t *testing.T) {
 	src := &fakeSource{}
 	p := &fakeProvider{grow: true}
@@ -188,7 +230,7 @@ func TestRunsAfterMaxInterval(t *testing.T) {
 	cfg.MaxInterval = 30 * time.Millisecond
 	w := New(src, p, cfg)
 
-	src.addLines(1)
+	src.addLines(3)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	go w.Run(ctx)
@@ -247,7 +289,7 @@ func TestFailureDoesNotAdvanceApplied(t *testing.T) {
 
 // 失敗が続いたら呼び出し間隔を広げること。
 func TestBackoffAfterFailures(t *testing.T) {
-	src := &fakeSource{}
+	src := &fakeSource{version: 1} // 初回の最低 3 行ルールとは独立に再試行を検証
 	p := &fakeProvider{err: fmt.Errorf("失敗")}
 	cfg := testConfig()
 	cfg.MinInterval = 20 * time.Millisecond

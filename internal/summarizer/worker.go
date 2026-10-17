@@ -66,9 +66,9 @@ type Config struct {
 // DefaultConfig は合意済みの初期値を返す。
 func DefaultConfig() Config {
 	return Config{
-		MinNewLines:    3,
-		MinInterval:    30 * time.Second,
-		MaxInterval:    60 * time.Second,
+		MinNewLines:    8,
+		MinInterval:    90 * time.Second,
+		MaxInterval:    180 * time.Second,
 		MaxChars:       2000,
 		FinalTimeout:   60 * time.Second,
 		Tick:           time.Second,
@@ -189,6 +189,11 @@ func (w *Worker) shouldRun() bool {
 	newLines := snap.Total - snap.AppliedThrough
 	if newLines <= 0 {
 		return false // 発言が無ければ呼ばない
+	}
+	// 最初の 1～2 行は予告・挨拶・文の断片だけのことがある。
+	// 最大待ち時間に達しても、初回は最低 3 行の文脈を待つ。
+	if snap.Version == 0 && newLines < 3 {
+		return false
 	}
 	since := w.now().Sub(w.lastRun)
 	wait := w.cfg.MinInterval

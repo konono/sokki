@@ -90,7 +90,8 @@ func Default() Config {
 		MaxSegment:      12 * time.Second,
 		Preroll:         300 * time.Millisecond,
 		VADFloorRatio:   3.0,
-		VADAbsThreshold: 0.006,
+		// 静かな会議音声も拾えるよう、実機で確認した 0.006 より低い値にする。
+		VADAbsThreshold: 0.004,
 		ShowInterim:     true,
 		// 発話開始から約 1 秒で最初の暫定表示、以後約 1 秒ごとに
 		// 発話開始からの音声を再認識して暫定行全体を差し替える。
@@ -98,9 +99,9 @@ func Default() Config {
 		InterimInterval: 1000 * time.Millisecond,
 		ShowBoard:       true,
 		SummaryProvider: "claude",
-		SummaryMinLines: 3,
-		SummaryMinWait:  30 * time.Second,
-		SummaryMaxWait:  60 * time.Second,
+		SummaryMinLines: 8,
+		SummaryMinWait:  90 * time.Second,
+		SummaryMaxWait:  180 * time.Second,
 		SummaryMaxChars: 2000,
 		ServerBin:       "whisper-server",
 		FFmpegBin:       "ffmpeg",

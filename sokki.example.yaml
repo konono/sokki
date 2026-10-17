@@ -74,9 +74,9 @@ summary:
 
   # 更新のきっかけ: min_interval 以上空いていて min_new_lines 以上たまったら。
   # 未処理があれば遅くとも max_interval で更新する。
-  min_new_lines: 3
-  min_interval: 30s
-  max_interval: 60s
+  min_new_lines: 8
+  min_interval: 90s
+  max_interval: 180s
 
   # 要約本文の目安上限 (文字数)。
   max_chars: 2000

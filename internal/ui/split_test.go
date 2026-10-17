@@ -234,6 +234,49 @@ func TestScrollReadsWholeBoard(t *testing.T) {
 	}
 }
 
+func TestCurrentTopicStaysVisibleWhileBoardScrolls(t *testing.T) {
+	term, s := newSplitTerm(t, 24, 60)
+	s.SetBoard(boardLines(80))
+	bh := boardHeaderRow(term)
+	if !strings.Contains(term.screen[bh+1], "今の話題: 長い会議") {
+		t.Fatalf("末尾追従中に話題が見えない: %q", term.screen[bh+1])
+	}
+	if !strings.Contains(boardArea(t, term), "要点 079") {
+		t.Fatal("話題の固定で最新要約が見えなくなった")
+	}
+	s.FocusNext()
+	s.ScrollHome()
+	s.ScrollPage(1)
+	if !strings.Contains(term.screen[bh+1], "今の話題: 長い会議") {
+		t.Fatal("スクロール後に話題が消えた")
+	}
+	s.SetBoard(append([]string{"今の話題: 新しい話題", "要約:"}, boardLines(60)[2:]...))
+	if !strings.Contains(term.screen[bh+1], "今の話題: 新しい話題") || strings.Contains(term.screen[bh+1], "長い会議") {
+		t.Fatal("話題の更新が固定行に反映されない")
+	}
+	term.Resize(30, 45)
+	s.Resize(30, 45)
+	if !strings.Contains(term.screen[boardHeaderRow(term)+1], "今の話題: 新しい話題") {
+		t.Fatal("リサイズ後に話題が消えた")
+	}
+}
+
+func TestPinnedTopicIsNotRepeatedInBoardBody(t *testing.T) {
+	term, s := newSplitTerm(t, 24, 60)
+	s.SetBoard([]string{"今の話題: 政府AI基盤", "要約:", "・APIの提供方式を比較"})
+	if got := strings.Count(boardArea(t, term), "今の話題: 政府AI基盤"); got != 1 {
+		t.Fatalf("今の話題の表示回数 = %d, want 1:\n%s", got, boardArea(t, term))
+	}
+}
+
+func TestTinyBoardKeepsBodyWhenTopicCannotBePinned(t *testing.T) {
+	term, s := newSplitTerm(t, 4, 40)
+	s.SetBoard([]string{"今の話題: 短い"})
+	if !strings.Contains(boardArea(t, term), "今の話題: 短い") {
+		t.Fatal("小さい画面で話題が見えない")
+	}
+}
+
 // 半ページ移動 (Ctrl+d / Ctrl+u) が効くこと。
 func TestHalfPageScroll(t *testing.T) {
 	term, s := newSplitTerm(t, 24, 60)

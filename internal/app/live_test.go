@@ -470,6 +470,7 @@ func TestWorkerUpdatesBoardFromLines(t *testing.T) {
 
 	lv.addLine("00:00:01", "来週のリリースについて話します")
 	lv.addLine("00:00:05", "テストは金曜までに終える予定です")
+	lv.addLine("00:00:09", "担当者を決めます")
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -484,8 +485,8 @@ func TestWorkerUpdatesBoardFromLines(t *testing.T) {
 	if cur.Version == 0 {
 		t.Fatal("会議ボードが自動更新されなかった")
 	}
-	if cur.AppliedThrough != 2 {
-		t.Errorf("反映位置 = %d, want 2", cur.AppliedThrough)
+	if cur.AppliedThrough != 3 {
+		t.Errorf("反映位置 = %d, want 3", cur.AppliedThrough)
 	}
 	if !strings.Contains(cur.Summary, "リリース") {
 		t.Errorf("要約に発言が反映されていない: %q", cur.Summary)

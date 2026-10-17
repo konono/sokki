@@ -80,6 +80,15 @@ func TestBuildPromptIncludesMaterial(t *testing.T) {
 	}
 }
 
+func TestBuildPromptAsksForTopicLevelSynthesis(t *testing.T) {
+	p := BuildPrompt(Input{Topic: "既存", Summary: "・前の論点", NewLines: []Line{{Text: "続き"}}})
+	for _, want := range []string{"発言 1 行につき要約 1 項目を作らない", "1～3 項目", "予告と本編", "毎回読み直し", "単純な末尾への追記は禁止", "過去の話題", "国名・組織名・人名", "事実の証拠ではありません"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("話題単位の統合を指示していない: %q", want)
+		}
+	}
+}
+
 func TestBuildPromptFinalMentionsFinal(t *testing.T) {
 	p := BuildPrompt(Input{Final: true, NewLines: []Line{{Text: "x"}}})
 	if !strings.Contains(p, "最終更新") {

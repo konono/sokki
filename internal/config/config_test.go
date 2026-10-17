@@ -1,10 +1,14 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/konono/sokki/internal/vad"
 )
 
 const (
@@ -106,5 +110,45 @@ func TestResolveModelExplicitWins(t *testing.T) {
 	}
 	if got != explicit {
 		t.Fatalf("選ばれたモデル = %s, want %s", got, explicit)
+	}
+}
+
+// 実機で観測した静かな入力 (背景 RMS 約 0.004、発話の強弱が交互) を
+// 既定の VAD 設定で発話として切り出せることを確認する。
+func TestDefaultVADDetectsQuietSpeech(t *testing.T) {
+	cfg := Default()
+	s := vad.New(vad.Options{
+		SampleRate: 16000, FrameSamples: 320,
+		SilenceHangover: cfg.SilenceHangover,
+		MinSpeech:       cfg.MinSpeech, MaxSegment: cfg.MaxSegment,
+		Preroll: cfg.Preroll, FloorRatio: cfg.VADFloorRatio,
+		AbsThreshold: cfg.VADAbsThreshold,
+	})
+	tone := func(amp float64) []int16 {
+		frame := make([]int16, 320)
+		for i := range frame {
+			frame[i] = int16(amp * 32767 * math.Sin(float64(i)*0.3))
+		}
+		return frame
+	}
+	var finals int
+	feed := func(amp float64, n int) {
+		frame := tone(amp)
+		for range n {
+			for _, ev := range s.Push(frame) {
+				if ev.Kind == vad.Final {
+					finals++
+				}
+			}
+		}
+	}
+	feed(0.0057, 150) // 3 秒の背景音 (RMS 約 0.004)
+	for range 12 {    // 1.2 秒の静かな発話
+		feed(0.030, 3) // 強い音節 60ms
+		feed(0.019, 2) // 弱い音節 40ms
+	}
+	feed(0.0005, int((cfg.SilenceHangover+time.Second)/(20*time.Millisecond)))
+	if finals != 1 {
+		t.Fatalf("静かな発話の確定区間 = %d, want 1 (しきい値 %.3f)", finals, cfg.VADAbsThreshold)
 	}
 }
