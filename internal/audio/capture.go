@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/konono/sokki/internal/proc"
 )
@@ -20,14 +23,20 @@ import (
 // Conference Output は 48 kHz ステレオ (Channels 1&2) で、
 // ffmpeg の -ac 1 がその 2ch を 1ch に統合する。
 type Capture struct {
-	cmd     *exec.Cmd
-	stdout  io.ReadCloser
-	reader  *bufio.Reader
-	stderr  *lockedBuffer
-	device  Device
-	closeMu sync.Mutex
-	closed  bool
+	cmd         *exec.Cmd
+	stdout      io.ReadCloser
+	reader      *bufio.Reader
+	stderr      *lockedBuffer
+	device      Device
+	readTimeout time.Duration
+	closeMu     sync.Mutex
+	closed      bool
 }
+
+// ErrStalled は ffmpeg が生きていても音声サンプルを返さなくなった状態。
+var ErrStalled = errors.New("音声入力が止まりました")
+
+const defaultReadTimeout = 10 * time.Second
 
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -73,17 +82,33 @@ func StartCapture(ctx context.Context, ffmpegBin string, dev Device, sampleRate 
 		cmd:    cmd,
 		stdout: stdout,
 		// 0.5 秒分のバッファを持たせ、推論中の取りこぼしを防ぐ。
-		reader: bufio.NewReaderSize(stdout, sampleRate),
-		stderr: errBuf,
-		device: dev,
+		reader:      bufio.NewReaderSize(stdout, sampleRate),
+		stderr:      errBuf,
+		device:      dev,
+		readTimeout: defaultReadTimeout,
 	}, nil
 }
 
 // Read は samples 個のサンプルを読み出して返す。
 // 返り値の長さは常に n か、エラー時は 0。
 func (c *Capture) Read(n int) ([]int16, error) {
+	// avfoundation はプロセスが生きたまま PCM を返さなくなることがある。
+	// パイプの read deadline で検出し、呼び出し側でキャプチャを再起動する。
+	if c.readTimeout > 0 {
+		pipe, ok := c.stdout.(*os.File)
+		if !ok {
+			return nil, fmt.Errorf("ffmpeg の stdout に読み取り期限を設定できません")
+		}
+		if err := pipe.SetReadDeadline(time.Now().Add(c.readTimeout)); err != nil {
+			return nil, fmt.Errorf("ffmpeg の stdout に読み取り期限を設定できません: %w", err)
+		}
+		defer pipe.SetReadDeadline(time.Time{})
+	}
 	raw := make([]byte, n*2)
 	if _, err := io.ReadFull(c.reader, raw); err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %v", ErrStalled, err)
+		}
 		return nil, c.wrapReadError(err)
 	}
 	out := make([]int16, n)

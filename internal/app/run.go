@@ -91,13 +91,14 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		defer finishRecord(rec, lv)
 	}
 
-	cap, err := audio.StartCapture(ctx, cfg.FFmpegBin, dev, config.SampleRate)
+	initialCap, err := audio.StartCapture(ctx, cfg.FFmpegBin, dev, config.SampleRate)
 	if err != nil {
 		markFailed(rec, err)
 		_ = writer.Close(time.Now())
 		return err
 	}
-	defer cap.Close()
+	var cap captureReader = initialCap
+	defer func() { _ = cap.Close() }()
 
 	con.Info("保存先       : %s", writer.Path())
 	if rec != nil {
@@ -175,7 +176,13 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		}
 	}()
 
-	readErr := captureLoop(runCtx, cap, seg, disp)
+	cap, readErr := captureWithRecovery(runCtx, cap, func() (captureReader, error) {
+		return audio.StartCapture(runCtx, cfg.FFmpegBin, dev, config.SampleRate)
+	}, seg, disp, func() {
+		v.ClearInterim()
+		lv.clearInterim()
+		con.Warn("音声入力が止まったため、取り込みを再接続します")
+	})
 
 	// 取り込みを直ちに止めて音声デバイスを解放する。
 	// (Loopback の "Mute when capturing" 下では、解放が遅れるほど
@@ -231,6 +238,35 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		return fmt.Errorf("保存先ファイルを閉じられませんでした: %w", closeErr)
 	}
 	return readErr
+}
+
+// captureWithRecovery は ffmpeg が生きたまま PCM を返さなくなったとき、
+// 未確定の発話を保存経路へ渡し、音声入力だけを開き直す。
+// 入力サンプルが途切れない通常時は captureLoop と同じ動作になる。
+func captureWithRecovery(ctx context.Context, cap captureReader,
+	open func() (captureReader, error), seg *vad.Segmenter,
+	disp *dispatcher, onStall func()) (captureReader, error) {
+	for {
+		err := captureLoop(ctx, cap, seg, disp)
+		if ctx.Err() != nil {
+			return cap, nil
+		}
+		if !errors.Is(err, audio.ErrStalled) {
+			return cap, err
+		}
+		_ = cap.Close()
+		if ev, ok := seg.Flush(); ok {
+			disp.SendFinal(ev)
+		}
+		if onStall != nil {
+			onStall()
+		}
+		next, openErr := open()
+		if openErr != nil {
+			return cap, fmt.Errorf("音声入力を再接続できません: %w", openErr)
+		}
+		cap = next
+	}
 }
 
 // markRecording は録音開始を 1 回の保存で記録する。
@@ -357,6 +393,11 @@ func clearInterim(con *view, lv *live) {
 // frameReader は PCM を供給する入力源 (テスト差し替え用)。
 type frameReader interface {
 	Read(n int) ([]int16, error)
+}
+
+type captureReader interface {
+	frameReader
+	Close() error
 }
 
 // transcriber は推論バックエンドの最小インタフェース (テスト差し替え用)。
