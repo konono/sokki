@@ -75,8 +75,8 @@ func New(opt Options) *Segmenter {
 		onsetFrames: onset,
 		prerollMax:  int(opt.Preroll.Seconds() * float64(opt.SampleRate)),
 		noiseFloor:  opt.AbsThreshold,
-		// 語尾が切れないよう、末尾の無音を 200ms だけ残す。
-		keepTailSamp: int64(0.2 * float64(opt.SampleRate)),
+		// 短い返答の語尾を認識できるよう、末尾を 400ms 残す。
+		keepTailSamp: int64(0.4 * float64(opt.SampleRate)),
 	}
 }
 
