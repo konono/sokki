@@ -46,7 +46,9 @@ func Check(ctx context.Context, dir string) Availability {
 	}
 	mux := detectMux()
 	if mux == "" {
-		return Availability{Reason: "Zellij / tmux のセッション内ではありません"}
+		return Availability{Reason: "MCP プロセスから Zellij / tmux のセッションと pane を特定できません。" +
+			"AI 本体が Zellij 内でも、MCP に環境変数が渡っていない場合があります。" +
+			"呼び出し元のシェルで panecom whoami を確認してください"}
 	}
 	// 実際に panecom が応答するかを確認する (whoami は非破壊)。
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -66,10 +68,10 @@ func Check(ctx context.Context, dir string) Availability {
 
 // detectMux は多重化ソフトを環境変数から判定する。
 func detectMux() string {
-	if os.Getenv("ZELLIJ_SESSION_NAME") != "" || os.Getenv("ZELLIJ") != "" {
+	if os.Getenv("ZELLIJ_SESSION_NAME") != "" && os.Getenv("ZELLIJ_PANE_ID") != "" {
 		return "zellij"
 	}
-	if os.Getenv("TMUX") != "" {
+	if os.Getenv("TMUX") != "" && os.Getenv("TMUX_PANE") != "" {
 		return "tmux"
 	}
 	return ""

@@ -41,15 +41,17 @@ func toolDefs() []toolDef {
 		{
 			Name: "start_or_attach",
 			Description: "会議の文字起こしを開始する。すでに録音中ならその会議を返し、" +
-				"新しいキャプチャは開始しない。録音がなければ panecom で専用 pane を開いて " +
+				"新しいキャプチャは開始しない。録音がなければ panecom で毎回新しい pane を開いて " +
 				"sokki を起動する。フォーカスは呼び出し元の pane に残す。" +
-				"panecom や Zellij/tmux が使えない場合は音声デバイスを開かずエラーを返す。",
+				"panecom が使えない場合は音声デバイスを開かずエラーを返す。" +
+				"MCP でセッションを検出できなくても、呼び出し元のシェルでは Zellij が使える場合がある。" +
+				"その場合は panecom whoami を確認し、画面のない直接録音へ切り替えない。",
 			InputSchema: obj(map[string]any{
 				"output_dir": str("保存先ディレクトリ。相対パスはこの呼び出しの作業ディレクトリ基準。" +
 					"省略時は設定ファイルの output.directory、なければ transcripts"),
 				"language": str("認識する言語 (ja / en / auto)。省略時は設定に従う"),
 				"device":   str("入力デバイス名。省略時は設定に従う"),
-				"auto_summary": map[string]any{"type": "boolean", "description": "会議ボードを発言から自動更新するか (既定 true)。" +
+				"auto_summary": map[string]any{"type": "boolean", "description": "会議ボードを発言から自動更新するか (既定は有効)。" +
 					"有効にすると会議テキストが AI プロバイダーへ送られる"},
 				"summary_provider": str("自動要約に使う AI (claude / codex)。省略時は設定に従う"),
 			}),

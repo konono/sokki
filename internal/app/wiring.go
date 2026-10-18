@@ -19,11 +19,11 @@ import (
 
 // newView は画面出力を決める。
 //
-// pane role が指定され (AI から起動され) かつ TTY の場合だけ上下分割にする。
-// 手動実行や非 TTY は従来どおりの行出力を保つ。
+// TTY で自動要約を表示する場合、または AI から起動された場合に上下分割にする。
+// 非 TTY と自動要約なしの手動実行は従来どおりの行出力を保つ。
 func newView(con *ui.Console, cfg config.Config) *view {
 	v := &view{con: con, autoSummary: cfg.AutoSummary}
-	if cfg.PaneRole == "" || !con.IsTTY() || !cfg.ShowBoard {
+	if !con.IsTTY() || !cfg.ShowBoard || cfg.PaneRole == "" && !cfg.AutoSummary {
 		return v
 	}
 	rows, cols := ui.TermSize()

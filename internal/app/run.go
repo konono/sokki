@@ -345,12 +345,20 @@ func handleEvent(ctx context.Context, client transcriber, writer *transcript.Wri
 		defer clearInterim(con, lv)
 	}
 
-	text, err := client.Transcribe(ctx, ev.Audio, config.SampleRate)
+	var text string
+	var err error
+	if ev.Kind == vad.Final {
+		text, err = transcribeFinal(ctx, client, ev.Audio)
+	} else {
+		text, err = client.Transcribe(ctx, ev.Audio, config.SampleRate)
+	}
 	if err != nil {
 		if ctx.Err() == nil {
 			con.Warn("文字起こしに失敗しました: %v", err)
 		}
-		return
+		if ev.Kind == vad.Interim {
+			return
+		}
 	}
 	text = transcript.Clean(text)
 	if text == "" || transcript.IsNoise(text) {

@@ -19,6 +19,8 @@ const (
 
 	// DefaultDevice は PLAN.md で指定された Loopback の仮想デバイス。
 	DefaultDevice = "Conference Output"
+	// DefaultAutoSummary は CLI と MCP に共通の自動要約の既定値。
+	DefaultAutoSummary = true
 )
 
 // Config は 1 回の実行を決める設定一式。
@@ -28,7 +30,7 @@ type Config struct {
 	Language  string
 	OutputDir string
 
-	// 区間検出
+	// 発話区間検出
 	SilenceHangover time.Duration
 	MinSpeech       time.Duration
 	MaxSegment      time.Duration
@@ -82,14 +84,13 @@ func Default() Config {
 		Device:    DefaultDevice,
 		Language:  "ja",
 		OutputDir: "transcripts",
-		// 約 0.5 秒の無音で発話の終わりとみなす (早く確定して保存するため)。
+		// 約 0.5 秒の無音で発話の終わりとみなし、確定する。
 		SilenceHangover: 500 * time.Millisecond,
 		MinSpeech:       400 * time.Millisecond,
-		// 会議では無音が入らず話し続けることが多い。長すぎると 1 行が
-		// 巨大になり確定も遅れるため、12 秒で区切る (実機確認で調整)。
-		MaxSegment:      12 * time.Second,
-		Preroll:         300 * time.Millisecond,
-		VADFloorRatio:   3.0,
+		// 長い発話は 12 秒で区切って確定する。
+		MaxSegment:    12 * time.Second,
+		Preroll:       300 * time.Millisecond,
+		VADFloorRatio: 3.0,
 		// 静かな会議音声も拾えるよう、実機で確認した 0.006 より低い値にする。
 		VADAbsThreshold: 0.004,
 		ShowInterim:     true,
@@ -98,6 +99,7 @@ func Default() Config {
 		InterimAfter:    1000 * time.Millisecond,
 		InterimInterval: 1000 * time.Millisecond,
 		ShowBoard:       true,
+		AutoSummary:     DefaultAutoSummary,
 		SummaryProvider: "claude",
 		SummaryMinLines: 8,
 		SummaryMinWait:  90 * time.Second,

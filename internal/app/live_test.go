@@ -372,13 +372,23 @@ func TestNonTTYViewHasNoSplit(t *testing.T) {
 	}
 }
 
-// pane role が無い手動実行でも分割表示を使わないこと。
-func TestManualRunHasNoSplit(t *testing.T) {
+// 自動要約が有効な手動実行では、要約を確認できるよう分割表示する。
+func TestManualAutoSummaryShowsSplit(t *testing.T) {
 	var buf bytes.Buffer
 	cfg := config.Default() // PaneRole 未設定
 	v := newView(ui.NewWith(&buf, true), cfg)
+	if v.split == nil {
+		t.Fatal("手動実行の自動要約を表示できない")
+	}
+}
+
+func TestManualWithoutAutoSummaryHasNoSplit(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := config.Default()
+	cfg.AutoSummary = false
+	v := newView(ui.NewWith(&buf, true), cfg)
 	if v.split != nil {
-		t.Fatal("手動実行で分割表示が有効になった")
+		t.Fatal("自動要約なしの手動実行で分割表示が有効になった")
 	}
 }
 
@@ -522,9 +532,10 @@ func (fakeSummaryProvider) Summarize(ctx context.Context, in summarizer.Input) (
 
 // --- 自動要約の有効化判定 ---
 
-func TestStartSummarizerDisabledByDefault(t *testing.T) {
+func TestStartSummarizerDisabledExplicitly(t *testing.T) {
 	lv, _, _ := newTestLive(t)
-	cfg := config.Default() // AutoSummary = false
+	cfg := config.Default()
+	cfg.AutoSummary = false
 	w, err := startSummarizer(cfg, lv)
 	if err != nil || w != nil {
 		t.Fatalf("無効のはずが w=%v err=%v", w, err)

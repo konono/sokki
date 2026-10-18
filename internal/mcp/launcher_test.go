@@ -29,6 +29,7 @@ func mockPanecom(t *testing.T, script string) string {
 	t.Cleanup(func() { panecom.Bin = old })
 	// useStateDir と同じ mux セッションを使う (記録の絞り込みと一致させる)。
 	t.Setenv("ZELLIJ_SESSION_NAME", "test-mux")
+	t.Setenv("ZELLIJ_PANE_ID", "42")
 	t.Setenv("TMUX", "")
 	return dir
 }
@@ -87,6 +88,7 @@ func newLauncher(t *testing.T) *PaneLauncher {
 func TestLauncherAvailableFailsOutsideMux(t *testing.T) {
 	mockPanecom(t, `echo developer`)
 	t.Setenv("ZELLIJ_SESSION_NAME", "")
+	t.Setenv("ZELLIJ_PANE_ID", "")
 	t.Setenv("ZELLIJ", "")
 	t.Setenv("TMUX", "")
 
@@ -133,8 +135,8 @@ esac`)
 	}
 }
 
-// 既存 pane があれば open せず再利用すること (停止済み pane の使い回し)。
-func TestLaunchReusesExistingPane(t *testing.T) {
+// 停止済みの pane が残っていても、新しい会議には新しい pane を開くこと。
+func TestLaunchOpensFreshPaneWhenOldPaneExists(t *testing.T) {
 	useStateDir(t)
 	dir := mockPanecom(t, `
 log="$(dirname "$0")/log.txt"
@@ -152,8 +154,8 @@ esac`)
 		t.Fatal(err)
 	}
 	log, _ := os.ReadFile(filepath.Join(dir, "log.txt"))
-	if contains(strings.Fields(string(log)), "open") {
-		t.Errorf("既存 pane があるのに open した: %s", log)
+	if !contains(strings.Fields(string(log)), "open") {
+		t.Errorf("新しい pane を開いていない: %s", log)
 	}
 }
 

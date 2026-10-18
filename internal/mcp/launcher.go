@@ -57,16 +57,14 @@ func (l *PaneLauncher) Launch(ctx context.Context, opt LaunchOptions) (*session.
 	}
 	role := l.RoleName
 
-	// 既存 pane を再利用できるなら開き直さない
-	// (停止済みの専用 pane は次の会議で使い回す)。
-	if _, err := panecom.Resolve(ctx, l.BaseDir, role); err != nil {
-		if err := panecom.Open(ctx, l.BaseDir, role, l.Direction); err != nil {
-			return nil, err
-		}
-		// pane の初期化 (role 登録) を待つ。
-		if err := l.waitForRole(ctx, role); err != nil {
-			return nil, err
-		}
+	// 新しい会議は毎回新しい pane に表示する。panecom の register は
+	// 同じ role の古い紐付けを新しい pane に移す。
+	if err := panecom.Open(ctx, l.BaseDir, role, l.Direction); err != nil {
+		return nil, err
+	}
+	// pane の初期化 (role 登録) を待つ。
+	if err := l.waitForRole(ctx, role); err != nil {
+		return nil, err
 	}
 
 	// 会議 ID はここで決めて sokki に渡す。
@@ -133,8 +131,7 @@ func (l *PaneLauncher) commandLine(id string, opt LaunchOptions) string {
 	if opt.Device != "" {
 		parts = append(parts, "--device", shellQuote(opt.Device))
 	}
-	// MCP 起点の会議は自動要約を既定で有効にする
-	// (手動 CLI 録音は従来どおり無効)。
+	// 明示的に要約を無効にした場合も CLI の既定値で再有効化されないようにする。
 	if opt.AutoSummary {
 		parts = append(parts, "--auto-summary")
 		if opt.SummaryProvider != "" {

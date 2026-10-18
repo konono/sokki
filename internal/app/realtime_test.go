@@ -36,6 +36,104 @@ func collectEvents(t *testing.T, frames [][]int16) []vad.Event {
 	return evs
 }
 
+// 長い発話は全体と短い区間の両方で認識し、欠けた箇所を補って保存する。
+func TestLongFinalCombinesWholeAndChunksWithoutWarning(t *testing.T) {
+	writer, err := transcript.New(t.TempDir(), time.Date(2026, 10, 19, 0, 0, 0, 0, time.Local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeTranscriber{texts: []string{
+		"よろしくお願いします",
+		"フランスの視察では", "現地の取り組みについて伺いました", "よろしくお願いします",
+	}}
+	ev := vad.Event{Kind: vad.Final, Audio: make([]int16, 12*config.SampleRate),
+		Start: time.Minute, End: time.Minute + 12*time.Second}
+	var screen bytes.Buffer
+	handleEvent(context.Background(), fake, writer, &view{con: ui.NewWith(&screen, false)}, nil, ev)
+	if err := writer.Close(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(writer.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"フランスの視察では", "現地の取り組み", "よろしくお願いします"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("%q が保存されなかった: %s", want, data)
+		}
+	}
+	if fake.calls != 4 {
+		t.Errorf("全体と短い区間の認識回数 = %d, want 4", fake.calls)
+	}
+	if strings.Contains(screen.String(), "警告") {
+		t.Errorf("正常な分割認識で警告が出た: %s", screen.String())
+	}
+}
+
+func TestReconcileTranscriptsPreservesWholeOnlyBeginning(t *testing.T) {
+	whole := "本当にアメリカも中国も巨額な投資でAI開発を競っているわけなんですが"
+	chunks := "高額な投資でAI開発を競っているわけなんですが"
+	got := reconcileTranscripts(whole, chunks)
+	if !strings.Contains(got, "アメリカも中国も") {
+		t.Errorf("全体認識にだけある冒頭が消えた: %q", got)
+	}
+	if strings.Count(got, "AI開発を競っている") != 1 {
+		t.Errorf("共通部分が重複した: %q", got)
+	}
+}
+
+func TestReconcileTranscriptsPreservesChunksOnlyMiddle(t *testing.T) {
+	whole := "よろしくお願いします"
+	chunks := "フランスの視察から帰ってきて よろしくお願いします"
+	got := reconcileTranscripts(whole, chunks)
+	if !strings.Contains(got, "フランスの視察から帰ってきて") {
+		t.Errorf("分割認識にだけある内容が消えた: %q", got)
+	}
+	if strings.Count(got, "よろしくお願いします") != 1 {
+		t.Errorf("共通部分が重複した: %q", got)
+	}
+}
+
+func TestReconcileTranscriptsPrefersWholeForSmallVariant(t *testing.T) {
+	whole := "2時間くらい前に話しました"
+	chunks := "2週間くらい前に話しました"
+	if got := reconcileTranscripts(whole, chunks); got != whole {
+		t.Errorf("小さい認識差で重複した: %q", got)
+	}
+}
+
+// 短い認識区間は音の小さい箇所で切り、全サンプルを重複なく渡す。
+func TestFinalRangesCoverAudioAtQuietBoundaries(t *testing.T) {
+	audio := make([]int16, 12*config.SampleRate)
+	for i := range audio {
+		audio[i] = 1000
+	}
+	for _, sec := range []int{4, 8} {
+		for i := sec*config.SampleRate - config.SampleRate/10; i < sec*config.SampleRate+config.SampleRate/10; i++ {
+			audio[i] = 0
+		}
+	}
+	ranges := finalRanges(audio)
+	if len(ranges) != 3 {
+		t.Fatalf("区間数 = %d, want 3", len(ranges))
+	}
+	last := 0
+	for i, r := range ranges {
+		if r.start != last || r.end <= r.start || r.end-r.start > 5*config.SampleRate {
+			t.Fatalf("区間 %d が欠落・重複・長すぎる: %+v", i, r)
+		}
+		last = r.end
+	}
+	if last != len(audio) {
+		t.Fatalf("末尾が欠けた: %d / %d", last, len(audio))
+	}
+	for _, cut := range []int{ranges[0].end, ranges[1].end} {
+		if audio[cut] != 0 {
+			t.Errorf("音の大きい箇所で切った: %d", cut)
+		}
+	}
+}
+
 func kinds(evs []vad.Event, k vad.Kind) []vad.Event {
 	var out []vad.Event
 	for _, e := range evs {

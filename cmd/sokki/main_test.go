@@ -262,7 +262,7 @@ func TestMCPStartRefusesWithoutPanecom(t *testing.T) {
 		}
 		env = append(env, e)
 	}
-	cmd.Env = append(env, "HOME="+t.TempDir())
+	cmd.Env = append(env, "HOME="+t.TempDir(), "SOKKI_DISABLE_PARENT_MUX=1")
 	cmd.Stdin = strings.NewReader(in)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

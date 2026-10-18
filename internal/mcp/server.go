@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/konono/sokki/internal/board"
+	"github.com/konono/sokki/internal/config"
 	"github.com/konono/sokki/internal/ipc"
 	"github.com/konono/sokki/internal/session"
 )
@@ -195,8 +196,8 @@ func resolveRecord(id string) (*session.Record, error) {
 
 // errNoMuxSession は Zellij / tmux のセッションを特定できない場合のエラー。
 var errNoMuxSession = fmt.Errorf(
-	"Zellij / tmux のセッションを特定できません\n" +
-		"対処: Zellij または tmux のセッション内で AI を起動してください\n" +
+	"MCP プロセスから Zellij / tmux のセッションを特定できません\n" +
+		"対処: 呼び出し元のシェルで panecom whoami と sokki mcp --check-panecom を確認してください\n" +
 		"      (別セッションの録音を誤って操作しないため、会議を自動選択していません)")
 
 // outOfSessionError は別セッションの録音を操作しようとした場合のエラー。
@@ -259,8 +260,8 @@ func (s *Server) startOrAttach(ctx context.Context, raw json.RawMessage) (any, e
 			return nil, fmt.Errorf("引数を解釈できません: %w", err)
 		}
 	}
-	// MCP 起点の会議は自動要約を既定で有効にする。
-	autoSummary := true
+	// CLI と同じ既定値を使う。明示指定があればその値を優先する。
+	autoSummary := config.DefaultAutoSummary
 	if args.AutoSummary != nil {
 		autoSummary = *args.AutoSummary
 	}
@@ -328,6 +329,9 @@ func (s *Server) getStatus(raw json.RawMessage) (any, error) {
 		_ = json.Unmarshal(raw, &args)
 	}
 	if args.ID == "" {
+		if session.CurrentMuxSession() == "" {
+			return nil, errNoMuxSession
+		}
 		// 録音中が無ければ、直近の記録を状態付きで返す。
 		if active, _ := session.FindActive(session.CurrentMuxSession()); active == nil {
 			records, _ := session.List()

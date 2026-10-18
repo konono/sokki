@@ -700,13 +700,13 @@ func TestSummarySectionAppliesAllFields(t *testing.T) {
 	}
 }
 
-// 既定では自動要約を有効にしないこと。
-func TestSummaryDisabledByDefaultInConfig(t *testing.T) {
+// 設定がない場合は自動要約の既定値を保つこと。
+func TestSummaryEnabledByDefaultInConfig(t *testing.T) {
 	f := mustLoad(t, "capture:\n  device: \"X\"\n")
 	cfg := Default()
 	f.Apply(&cfg)
-	if cfg.AutoSummary {
-		t.Error("設定していないのに自動要約が有効")
+	if !cfg.AutoSummary {
+		t.Error("設定していないのに自動要約が無効")
 	}
 }
 
@@ -832,8 +832,8 @@ func TestSummaryDefaultsWhenNothingGiven(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := Resolve(defaults, *parsed, fs, nil)
-	if got.AutoSummary {
-		t.Error("既定で自動要約が有効")
+	if !got.AutoSummary {
+		t.Error("既定で自動要約が無効")
 	}
 	if got.SummaryMinLines != 8 || got.SummaryMinWait != 90*time.Second || got.SummaryMaxWait != 180*time.Second {
 		t.Errorf("既定値が違う: %d / %v / %v", got.SummaryMinLines, got.SummaryMinWait, got.SummaryMaxWait)

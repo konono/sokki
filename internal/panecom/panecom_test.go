@@ -29,6 +29,7 @@ func mockBin(t *testing.T, script string) string {
 func inMux(t *testing.T) {
 	t.Helper()
 	t.Setenv("ZELLIJ_SESSION_NAME", "test-session")
+	t.Setenv("ZELLIJ_PANE_ID", "42")
 	t.Setenv("TMUX", "")
 }
 
@@ -51,8 +52,10 @@ func TestCheckOKInsideMux(t *testing.T) {
 // 多重化セッションの外では利用不可とすること。
 func TestCheckFailsOutsideMux(t *testing.T) {
 	t.Setenv("ZELLIJ_SESSION_NAME", "")
+	t.Setenv("ZELLIJ_PANE_ID", "")
 	t.Setenv("ZELLIJ", "")
 	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
 	mockBin(t, `echo developer`)
 
 	av := Check(context.Background(), "")

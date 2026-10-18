@@ -58,8 +58,9 @@ transcription:
 
 summary:
   # 会議ボードを発言から自動更新するか。
-  # MCP (start_or_attach) 起点の録音は既定で有効、手動実行は既定で無効。
-  enabled: false
+  # MCP・手動実行とも既定で有効。不要な場合は false にする。
+  # 有効時、確定した会議テキストは設定した AI プロバイダーへ送られます。
+  enabled: true
 
   # 要約に使う AI。プリセットは現在 "claude" のみ。
   provider: claude

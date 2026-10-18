@@ -2,7 +2,7 @@
 //
 // 音声は avfoundation (ffmpeg) から取り込み、推論はローカルの
 // whisper.cpp (whisper-server) を外部プロセスとして使う。
-// クラウド API は呼ばない。
+// 自動要約が有効な場合、確定テキストは設定した AI プロバイダーへ送る。
 package main
 
 import (
@@ -58,7 +58,7 @@ func main() {
 	fs.StringVar(&cfg.FFmpegBin, "ffmpeg", cfg.FFmpegBin, "ffmpeg の実行ファイル")
 	fs.StringVar(&cfg.InitialPrompt, "prompt", "", "認識のヒントになる初期プロンプト (固有名詞など)")
 	fs.StringVar(&cfg.PaneRole, "pane-role", "",
-		"AI 連携時の panecom role 名 (指定すると会議ボードを表示し MCP から操作できる)")
+		"AI 連携時の panecom role 名 (指定すると MCP から操作できる)")
 	fs.StringVar(&cfg.SessionID, "session-id", "", "会議 ID (省略時は開始時刻から生成)")
 	fs.StringVar(&cfg.MuxSession, "mux-session", "",
 		"Zellij / tmux のセッション識別子 (省略時は環境から判定)")
@@ -73,7 +73,7 @@ func main() {
 		"発話開始から最初の暫定表示までの時間")
 	fs.DurationVar(&cfg.InterimInterval, "interim-interval", cfg.InterimInterval,
 		"暫定表示を更新する間隔")
-	fs.DurationVar(&cfg.MaxSegment, "max-segment", cfg.MaxSegment, "1 区間の最大長")
+	fs.DurationVar(&cfg.MaxSegment, "max-segment", cfg.MaxSegment, "1 発話区間の最大長")
 	fs.Float64Var(&cfg.VADAbsThreshold, "vad-threshold", cfg.VADAbsThreshold, "発話判定の下限しきい値 (0-1)")
 
 	fs.Usage = func() {

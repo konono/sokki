@@ -21,6 +21,7 @@ import (
 type mockLauncher struct {
 	available error
 	launched  int
+	opt       LaunchOptions
 	rec       *session.Record
 	launchErr error
 }
@@ -29,6 +30,7 @@ func (m *mockLauncher) Available(ctx context.Context) error { return m.available
 
 func (m *mockLauncher) Launch(ctx context.Context, opt LaunchOptions) (*session.Record, error) {
 	m.launched++
+	m.opt = opt
 	if m.launchErr != nil {
 		return nil, m.launchErr
 	}
@@ -204,6 +206,9 @@ func TestStartOrAttachLaunchesWhenIdle(t *testing.T) {
 	}
 	if l.launched != 1 {
 		t.Errorf("起動回数 = %d, want 1", l.launched)
+	}
+	if !l.opt.AutoSummary {
+		t.Error("MCP の既定値で自動要約が無効")
 	}
 	if out["attached"] != false || out["id"] != "new1" {
 		t.Errorf("応答が不正: %+v", out)
@@ -623,6 +628,17 @@ func TestStartOrAttachRefusesWithoutMuxSession(t *testing.T) {
 	}
 	if l.launched != 0 {
 		t.Errorf("mux 不明なのに起動した (%d 回)", l.launched)
+	}
+}
+
+// セッション不明を「録音なし」と誤案内しないこと。
+func TestStatusReportsUnknownMuxSession(t *testing.T) {
+	useStateDir(t)
+	t.Setenv("ZELLIJ_SESSION_NAME", "")
+	t.Setenv("TMUX", "")
+	_, err := call(t, New(&mockLauncher{}), "get_status", nil)
+	if err == nil || !strings.Contains(err.Error(), "MCP プロセスから") {
+		t.Fatalf("セッション不明の原因が返らない: %v", err)
 	}
 }
 
