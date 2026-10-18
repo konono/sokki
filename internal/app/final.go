@@ -12,16 +12,52 @@ import (
 // finalRange は確定認識に渡す、重ならない PCM の範囲。
 type finalRange struct{ start, end int }
 
+// finalObservation records the raw hypotheses before reconciliation. It is
+// useful for diagnosing a phrase that appeared in a chunk but not in the
+// saved final text.
+type finalObservation struct {
+	Whole           string
+	Parts           []string
+	ReconcileWhole  string
+	ReconcileChunks string
+	RangeCount      int
+	PartSpans       []partSpan
+	ReconcileMode   string
+	Result          string
+}
+
+// partSpan is the rune range of one retained chunk in the joined hypothesis.
+// The separating space is deliberately outside every span.
+type partSpan struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
 // transcribeFinal は長い発話を音声全体と短い区間の両方で認識する。
 // 全体の認識が途中を省く場合と、短い区間が文頭や区間境界を失う場合の
 // 双方に備える。暫定文は確定文の材料にしない。
 func transcribeFinal(ctx context.Context, client transcriber, audio []int16) (string, error) {
+	return transcribeFinalObserved(ctx, client, audio, nil)
+}
+
+func transcribeFinalObserved(ctx context.Context, client transcriber, audio []int16,
+	observe func(finalObservation)) (string, error) {
 	ranges := finalRanges(audio)
 	if len(ranges) == 1 {
-		return client.Transcribe(ctx, audio, config.SampleRate)
+		text, err := client.Transcribe(ctx, audio, config.SampleRate)
+		if observe != nil {
+			observe(finalObservation{
+				Whole: text, ReconcileWhole: transcript.Clean(text),
+				RangeCount: 1, ReconcileMode: "single", Result: text,
+			})
+		}
+		return text, err
 	}
 	whole, wholeErr := client.Transcribe(ctx, audio, config.SampleRate)
 	parts := make([]string, 0, len(ranges))
+	spans := make([]partSpan, 0, len(ranges))
+	joinedRunes := 0
+	observedParts := make([]string, 0, len(ranges))
 	var firstErr error
 	for i, r := range ranges {
 		text, err := client.Transcribe(ctx, audio[r.start:r.end], config.SampleRate)
@@ -30,17 +66,34 @@ func transcribeFinal(ctx context.Context, client transcriber, audio []int16) (st
 			text, err = client.Transcribe(ctx, audio[r.start:r.end], config.SampleRate)
 		}
 		if err != nil {
+			observedParts = append(observedParts, "")
 			if firstErr == nil {
 				firstErr = fmt.Errorf("音声区間 %d/%d: %w", i+1, len(ranges), err)
 			}
 			continue
 		}
 		text = transcript.Clean(text)
+		observedParts = append(observedParts, text)
 		if text != "" && !transcript.IsNoise(text) {
+			if len(parts) > 0 {
+				joinedRunes++
+			}
+			spans = append(spans, partSpan{joinedRunes, joinedRunes + len([]rune(text))})
+			joinedRunes += len([]rune(text))
 			parts = append(parts, text)
 		}
 	}
-	text := reconcileTranscripts(transcript.Clean(whole), strings.Join(parts, " "))
+	wholeClean, chunksJoined := transcript.Clean(whole), strings.Join(parts, " ")
+	text := reconcileTranscripts(wholeClean, chunksJoined)
+	if observe != nil {
+		observe(finalObservation{
+			Whole: whole, Parts: observedParts,
+			ReconcileWhole: wholeClean, ReconcileChunks: chunksJoined,
+			RangeCount: len(ranges), Result: text,
+			PartSpans:     spans,
+			ReconcileMode: "baseline",
+		})
+	}
 	if text != "" {
 		return text, nil
 	}
@@ -53,6 +106,8 @@ func transcribeFinal(ctx context.Context, client transcriber, audio []int16) (st
 // reconcileTranscripts は同じ音声の全体認識と分割認識を照合する。
 // 一致する長い箇所を固定し、その間の不一致ではより内容の多い候補を残す。
 // 小さい言い換えでは文脈を持つ全体認識を優先する。
+// part 内部を一律優先する実験では、実音声の「チーム未来投資」が
+// 「チーム未来投手」に変わったため、採用していない。
 func reconcileTranscripts(whole, chunks string) string {
 	return string(reconcileRunes([]rune(whole), []rune(chunks)))
 }

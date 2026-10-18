@@ -30,6 +30,7 @@ var shuttingDown atomic.Bool
 // Run は文字起こしを開始し、ctx がキャンセルされるまで動作する。
 func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	shuttingDown.Store(false)
+	traceDir := asrTraceDir()
 
 	// 起動直後に会議記録を作る。これより前で失敗すると AI が
 	// 原因を取得できないため、初期化のどの段階で失敗しても
@@ -99,6 +100,18 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	}
 	var cap captureReader = initialCap
 	defer func() { _ = cap.Close() }()
+	rawTrace, traceErr := startRawASRTrace(traceDir)
+	if traceErr != nil {
+		con.Warn("ASR 診断の開始に失敗しました: %v", traceErr)
+	} else if rawTrace != nil {
+		rawTrace.onIssue = func(err error) { con.Warn("ASR 診断の音声保存: %v", err) }
+		cap = &tracedCaptureReader{captureReader: cap, trace: rawTrace}
+		defer func() {
+			if err := rawTrace.Close(); err != nil {
+				con.Warn("ASR 診断の音声保存に失敗しました: %v", err)
+			}
+		}()
+	}
 
 	con.Info("保存先       : %s", writer.Path())
 	if rec != nil {
@@ -163,7 +176,7 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		transcribeLoop(workCtx, cfg, client, writer, v, disp.events, lv)
+		transcribeLoop(workCtx, cfg, client, writer, v, disp.events, lv, traceDir)
 	}()
 
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -177,7 +190,11 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	}()
 
 	cap, readErr := captureWithRecovery(runCtx, cap, func() (captureReader, error) {
-		return audio.StartCapture(runCtx, cfg.FFmpegBin, dev, config.SampleRate)
+		next, err := audio.StartCapture(runCtx, cfg.FFmpegBin, dev, config.SampleRate)
+		if err != nil || rawTrace == nil {
+			return next, err
+		}
+		return &tracedCaptureReader{captureReader: next, trace: rawTrace}, nil
 	}, seg, disp, func() {
 		v.ClearInterim()
 		lv.clearInterim()
@@ -232,6 +249,11 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	if n := disp.Dropped(); n > 0 {
 		con.Warn("期限内に処理できず保存できなかった区間: %d 件", n)
 	}
+	if traceDir != "" {
+		if err := traceASRStats(traceDir, disp.Dropped()); err != nil && asrTraceWarned.CompareAndSwap(false, true) {
+			con.Warn("ASR 診断の保存に失敗しました: %v", err)
+		}
+	}
 	con.Info("保存先       : %s", writer.Path())
 
 	if closeErr != nil {
@@ -254,6 +276,10 @@ func captureWithRecovery(ctx context.Context, cap captureReader,
 		if !errors.Is(err, audio.ErrStalled) {
 			return cap, err
 		}
+		var traced *tracedCaptureReader
+		if r, ok := cap.(*tracedCaptureReader); ok {
+			traced = r
+		}
 		_ = cap.Close()
 		if ev, ok := seg.Flush(); ok {
 			disp.SendFinal(ev)
@@ -264,6 +290,16 @@ func captureWithRecovery(ctx context.Context, cap captureReader,
 		next, openErr := open()
 		if openErr != nil {
 			return cap, fmt.Errorf("音声入力を再接続できません: %w", openErr)
+		}
+		if traced != nil {
+			gap := time.Duration(0)
+			if !traced.lastRead.IsZero() {
+				gap = time.Since(traced.lastRead)
+			}
+			traced.trace.recoveries++
+			if err := traceASRRecovery(traced.trace.dir, traced.trace.samples, gap); err != nil {
+				traced.trace.report(err)
+			}
 		}
 		cap = next
 	}
@@ -317,7 +353,11 @@ func captureLoop(ctx context.Context, cap frameReader, seg *vad.Segmenter,
 
 // transcribeLoop は区間を順に文字起こしして表示・保存する。
 func transcribeLoop(ctx context.Context, cfg config.Config, client transcriber,
-	writer *transcript.Writer, con *view, events <-chan vad.Event, lv *live) {
+	writer *transcript.Writer, con *view, events <-chan vad.Event, lv *live, traceDirs ...string) {
+	traceDir := asrTraceDir()
+	if len(traceDirs) > 0 {
+		traceDir = traceDirs[0]
+	}
 	for ev := range events {
 		if ctx.Err() != nil {
 			continue
@@ -330,7 +370,7 @@ func transcribeLoop(ctx context.Context, cfg config.Config, client transcriber,
 		if ev.Kind == vad.Interim && len(events) > 0 {
 			continue
 		}
-		handleEvent(ctx, client, writer, con, lv, ev)
+		handleEventWithTrace(ctx, client, writer, con, lv, ev, traceDir)
 	}
 }
 
@@ -341,16 +381,41 @@ func transcribeLoop(ctx context.Context, cfg config.Config, client transcriber,
 // 画面に並び、AI 側も消えた発話を読み続ける)。
 func handleEvent(ctx context.Context, client transcriber, writer *transcript.Writer,
 	con *view, lv *live, ev vad.Event) {
+	handleEventWithTrace(ctx, client, writer, con, lv, ev, asrTraceDir())
+}
+
+func handleEventWithTrace(ctx context.Context, client transcriber, writer *transcript.Writer,
+	con *view, lv *live, ev vad.Event, traceDir string) {
 	if ev.Kind != vad.Interim {
 		defer clearInterim(con, lv)
 	}
 
 	var text string
 	var err error
+	startedInference := time.Now()
+	var observation finalObservation
 	if ev.Kind == vad.Final {
-		text, err = transcribeFinal(ctx, client, ev.Audio)
+		if traceDir == "" {
+			text, err = transcribeFinal(ctx, client, ev.Audio)
+		} else {
+			text, err = transcribeFinalObserved(ctx, client, ev.Audio, func(obs finalObservation) {
+				observation = obs
+			})
+		}
 	} else {
 		text, err = client.Transcribe(ctx, ev.Audio, config.SampleRate)
+	}
+	if traceDir != "" {
+		latency := time.Since(startedInference)
+		var traceErr error
+		if ev.Kind == vad.Final {
+			traceErr = traceASRFinal(traceDir, ev, observation, err, latency)
+		} else {
+			traceErr = traceASRInterim(traceDir, ev, text, latency)
+		}
+		if traceErr != nil && asrTraceWarned.CompareAndSwap(false, true) {
+			con.Warn("ASR 診断の保存に失敗しました: %v", traceErr)
+		}
 	}
 	if err != nil {
 		if ctx.Err() == nil {
