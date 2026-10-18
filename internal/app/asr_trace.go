@@ -193,6 +193,7 @@ type asrTraceRecord struct {
 	TraceError         string     `json:"trace_error,omitempty"`
 	LatencyMS          int64      `json:"latency_ms,omitempty"`
 	AudioSamps         int        `json:"audio_samples,omitempty"`
+	SpeechSamples      int64      `json:"speech_samples,omitempty"`
 	SampleOffset       int64      `json:"sample_offset,omitempty"`
 	GapMS              int64      `json:"gap_ms,omitempty"`
 	TraceDroppedFrames int        `json:"trace_dropped_frames,omitempty"`

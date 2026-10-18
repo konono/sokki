@@ -27,6 +27,13 @@ type Event struct {
 	End   time.Duration // 会議開始からの終了時刻
 }
 
+// Discard records a segment rejected by MinSpeech, including its input range.
+type Discard struct {
+	Start, End    time.Duration
+	Samples       int
+	SpeechSamples int64
+}
+
 // Options は検出パラメータ。
 type Options struct {
 	SampleRate      int
@@ -62,7 +69,11 @@ type Segmenter struct {
 	nextInterm   int64 // 次に暫定結果を出すサンプル位置
 	speechSamp   int64 // 現在の区間のうち発話と判定されたサンプル数
 	keepTailSamp int64 // 確定時に末尾へ残す無音の長さ
+	discarded    []Discard
 }
+
+// Discarded is read after capture stops; it does not change segmentation.
+func (s *Segmenter) Discarded() []Discard { return append([]Discard(nil), s.discarded...) }
 
 // New は Segmenter を生成する。
 func New(opt Options) *Segmenter {
@@ -207,6 +218,10 @@ func (s *Segmenter) finish() (Event, bool) {
 
 	// 発話そのものの長さで足切りする (preroll や後続無音は数えない)。
 	if speech < s.durToSamples(s.opt.MinSpeech) {
+		s.discarded = append(s.discarded, Discard{
+			Start: s.samplesToDur(start), End: s.samplesToDur(start + int64(len(audio))),
+			Samples: len(audio), SpeechSamples: speech,
+		})
 		return Event{}, false
 	}
 	// 末尾の無音は keepTailSamp を残して削る。

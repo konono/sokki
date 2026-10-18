@@ -250,6 +250,14 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		con.Warn("期限内に処理できず保存できなかった区間: %d 件", n)
 	}
 	if traceDir != "" {
+		for _, discarded := range seg.Discarded() {
+			if err := appendASRTrace(traceDir, asrTraceRecord{
+				Kind: "vad_discard", StartMS: discarded.Start.Milliseconds(), EndMS: discarded.End.Milliseconds(),
+				AudioSamps: discarded.Samples, SpeechSamples: discarded.SpeechSamples,
+			}, nil); err != nil && asrTraceWarned.CompareAndSwap(false, true) {
+				con.Warn("ASR 診断の保存に失敗しました: %v", err)
+			}
+		}
 		if err := traceASRStats(traceDir, disp.Dropped()); err != nil && asrTraceWarned.CompareAndSwap(false, true) {
 			con.Warn("ASR 診断の保存に失敗しました: %v", err)
 		}
