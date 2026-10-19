@@ -391,7 +391,7 @@ Whisperを使う場合は[Whisperの起動例](#setup-whisper)の `--auto-summar
 | 変更 | 一緒に確認する項目 |
 |---|---|
 | 新しい機能を使う | ソース更新後に `make build`。PATH上の古い `sokki` ではなく今回の `./bin/sokki` を使う |
-| Whisper → Qwen | `backend`、`qwen_python`、`qwen_model`、`language: ja` を設定し、Whisper用 `model` と `translation.mode` を空にする |
+| Whisper → Qwen | `backend`、`qwen_python`、`qwen_model`、`language: ja` を設定し、Whisper用 `model` を空にし、YAMLの `translation.mode` 行（または `translation` 節）を削除する。CLI切替では `--translate ""` を指定する |
 | Qwen → Whisper | `backend: whisper`、GGML `model`、`final_strategy`。Qwen用パスは使われない |
 | Claude → Ollama | 共通設定の `llm.provider: ollama`・取得済みモデルの `llm.model`・`llm.ollama_url` を設定し、`summary.command` を外す |
 | Ollama → Claude | 共通設定の `llm.provider: claude` **と `llm.model: ""` の両方**を戻す |
