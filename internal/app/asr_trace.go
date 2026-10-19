@@ -182,6 +182,7 @@ type asrTraceRecord struct {
 	Interim            string     `json:"interim,omitempty"`
 	Whole              string     `json:"whole,omitempty"`
 	Parts              []string   `json:"parts,omitempty"`
+	RetryParts         []string   `json:"retry_parts,omitempty"`
 	ReconcileWhole     string     `json:"reconcile_whole,omitempty"`
 	ReconcileChunks    string     `json:"reconcile_chunks,omitempty"`
 	RangeCount         int        `json:"range_count,omitempty"`
@@ -213,7 +214,7 @@ func traceASRFinal(dir string, ev vad.Event, obs finalObservation, inferenceErr 
 	latency time.Duration) error {
 	rec := asrTraceRecord{
 		Kind: "final", StartMS: ev.Start.Milliseconds(), EndMS: ev.End.Milliseconds(),
-		Whole: obs.Whole, Parts: obs.Parts, Result: obs.Result,
+		Whole: obs.Whole, Parts: obs.Parts, RetryParts: obs.RetryParts, Result: obs.Result,
 		ReconcileWhole: obs.ReconcileWhole, ReconcileChunks: obs.ReconcileChunks,
 		RangeCount:    obs.RangeCount,
 		PartSpans:     obs.PartSpans,

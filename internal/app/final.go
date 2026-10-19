@@ -16,8 +16,9 @@ type finalRange struct{ start, end int }
 // useful for diagnosing a phrase that appeared in a chunk but not in the
 // saved final text.
 type finalObservation struct {
+	RetryParts      []string
 	Whole           string
-	Parts           []string
+	Parts           []string // Cleaned first-pass chunks, before retry and noise filtering.
 	ReconcileWhole  string
 	ReconcileChunks string
 	RangeCount      int
@@ -44,6 +45,8 @@ func transcribeFinalObserved(ctx context.Context, client transcriber, audio []in
 	observe func(finalObservation)) (string, error) {
 	ranges := finalRanges(audio)
 	if len(ranges) == 1 {
+		// Short finals (up to 7s) keep their single-pass path; sparse retries
+		// currently apply only to chunks inside longer finals.
 		text, err := client.Transcribe(ctx, audio, config.SampleRate)
 		if observe != nil {
 			observe(finalObservation{
@@ -58,6 +61,7 @@ func transcribeFinalObserved(ctx context.Context, client transcriber, audio []in
 	spans := make([]partSpan, 0, len(ranges))
 	joinedRunes := 0
 	observedParts := make([]string, 0, len(ranges))
+	retryParts := make([]string, len(ranges))
 	var firstErr error
 	for i, r := range ranges {
 		text, err := client.Transcribe(ctx, audio[r.start:r.end], config.SampleRate)
@@ -74,6 +78,22 @@ func transcribeFinalObserved(ctx context.Context, client transcriber, audio []in
 		}
 		text = transcript.Clean(text)
 		observedParts = append(observedParts, text)
+		// A long chunk can collapse to a short reply even when it contains speech.
+		// Retry once with silent padding, preserving every original sample and
+		// avoiding a new split. These bounds were evaluated on Japanese audio;
+		// sparse speech alone is not proof of a recognition failure. Failed or
+		// still-sparse retries retain the original text.
+		if r.end-r.start > 4*config.SampleRate && len([]rune(text))*config.SampleRate < 2*(r.end-r.start) {
+			const padding = config.SampleRate * 300 / 1000
+			padded := make([]int16, r.end-r.start+2*padding)
+			copy(padded[padding:], audio[r.start:r.end])
+			candidate, retryErr := client.Transcribe(ctx, padded, config.SampleRate)
+			candidate = transcript.Clean(candidate)
+			retryParts[i] = candidate
+			if retryErr == nil && !transcript.IsNoise(candidate) && len([]rune(candidate))*config.SampleRate >= 2*(r.end-r.start) {
+				text = candidate
+			}
+		}
 		if text != "" && !transcript.IsNoise(text) {
 			if len(parts) > 0 {
 				joinedRunes++
@@ -87,7 +107,7 @@ func transcribeFinalObserved(ctx context.Context, client transcriber, audio []in
 	text := reconcileTranscripts(wholeClean, chunksJoined)
 	if observe != nil {
 		observe(finalObservation{
-			Whole: whole, Parts: observedParts,
+			Whole: whole, Parts: observedParts, RetryParts: retryParts,
 			ReconcileWhole: wholeClean, ReconcileChunks: chunksJoined,
 			RangeCount: len(ranges), Result: text,
 			PartSpans:     spans,
