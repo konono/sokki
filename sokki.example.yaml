@@ -74,13 +74,17 @@ summary:
   # 有効時、確定した会議テキストは設定した AI プロバイダーへ送られます。
   enabled: true
 
-  # 要約に使う AI。プリセットは現在 "claude" のみ。
+  # 要約に使う AI。既定は "claude"。Ollama は明示した場合のみ使う。
   provider: claude
 
-  # モデル (省略時は CLI の既定)。
+  # Claude: 省略時は CLI の既定。Ollama: モデル名を必ず明示。
   model: ""
 
-  # 任意のコマンドを使う場合は配列で指定する (provider より優先)。
+  # provider: ollama の場合だけ使用。既存 server の loopback URL。
+  # Ollama やモデルの起動・ダウンロードは sokki が行わない。
+  # ollama_url: http://127.0.0.1:11434
+
+  # 任意のコマンドを使う場合は配列で指定する (ollama と併用不可)。
   # 会議の発言は外部入力なので、ツールを無効にした実行形にすること。
   #   command: ["codex", "exec", "--sandbox", "read-only", "-"]
   # command: []

@@ -70,8 +70,9 @@ func main() {
 	fs.BoolVar(&cfg.AutoSummary, "auto-summary", cfg.AutoSummary,
 		"確定した発言から会議ボードを自動更新する (AI を呼ぶ)")
 	fs.StringVar(&cfg.SummaryProvider, "summary-provider", cfg.SummaryProvider,
-		"自動要約に使う AI (現在は claude のみ。他は設定ファイルの summary.command で指定)")
+		"自動要約に使う AI (claude / ollama。その他は summary.command で指定)")
 	fs.StringVar(&cfg.SummaryModel, "summary-model", "", "自動要約のモデル (省略時は CLI の既定)")
+	fs.StringVar(&cfg.OllamaURL, "summary-ollama-url", cfg.OllamaURL, "要約用の既存 Ollama server URL (loopback のみ)")
 	fs.DurationVar(&cfg.SilenceHangover, "silence", cfg.SilenceHangover, "この長さの無音で発話を確定する")
 	fs.DurationVar(&cfg.InterimAfter, "interim-after", cfg.InterimAfter,
 		"発話開始から最初の暫定表示までの時間")

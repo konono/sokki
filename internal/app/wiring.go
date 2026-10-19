@@ -219,6 +219,21 @@ func startSummarizer(cfg config.Config, lv *live) (*summarizer.Worker, error) {
 		})
 		return nil, nil
 	}
+	if cfg.SummaryProvider == "ollama" {
+		if len(cfg.SummaryCommand) != 0 {
+			err := fmt.Errorf("summary.provider=ollama と summary.command は同時に指定できません")
+			lv.SetSummaryStatus(func() summarizer.Status { return summarizer.DisabledStatus(err.Error()) })
+			return nil, err
+		}
+		p, err := summarizer.NewOllamaProvider(cfg.SummaryModel, cfg.OllamaURL)
+		if err != nil {
+			lv.SetSummaryStatus(func() summarizer.Status { return summarizer.DisabledStatus(err.Error()) })
+			return nil, err
+		}
+		w := summarizer.New(lv, p, summaryConfig(cfg))
+		lv.SetSummaryStatus(w.Status)
+		return w, nil
+	}
 	command := cfg.SummaryCommand
 	if len(command) == 0 {
 		var err error
@@ -238,6 +253,18 @@ func startSummarizer(cfg config.Config, lv *live) (*summarizer.Worker, error) {
 		return nil, fmt.Errorf("%s\n対処: インストールするか --summary-provider で変更してください", msg)
 	}
 
+	scfg := summaryConfig(cfg)
+	p := &summarizer.ExecProvider{
+		Command: command,
+		Label:   cfg.SummaryProvider,
+		Timeout: scfg.FinalTimeout,
+	}
+	w := summarizer.New(lv, p, scfg)
+	lv.SetSummaryStatus(w.Status)
+	return w, nil
+}
+
+func summaryConfig(cfg config.Config) summarizer.Config {
 	scfg := summarizer.DefaultConfig()
 	if cfg.SummaryMinLines > 0 {
 		scfg.MinNewLines = cfg.SummaryMinLines
@@ -251,14 +278,7 @@ func startSummarizer(cfg config.Config, lv *live) (*summarizer.Worker, error) {
 	if cfg.SummaryMaxChars > 0 {
 		scfg.MaxChars = cfg.SummaryMaxChars
 	}
-	p := &summarizer.ExecProvider{
-		Command: command,
-		Label:   cfg.SummaryProvider,
-		Timeout: scfg.FinalTimeout,
-	}
-	w := summarizer.New(lv, p, scfg)
-	lv.SetSummaryStatus(w.Status)
-	return w, nil
+	return scfg
 }
 
 // updateRecord は記録の状態を更新する。

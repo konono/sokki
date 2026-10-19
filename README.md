@@ -571,13 +571,15 @@ MCP の `start_or_attach` と手動 CLI で始めた会議は、**質問しな�
 | 設定 | 既定 | 意味 |
 |---|---|---|
 | `--auto-summary` | 有効 | 発言から会議ボードを自動更新 |
-| `--summary-provider` | `claude` | 要約に使う AI（プリセットは現在 `claude` のみ）|
-| `--summary-model` | CLI の既定 | モデル |
+| `--summary-provider` | `claude` | 要約に使う AI (`claude` / `ollama`) |
+| `--summary-model` | Claude CLI の既定 | モデル。Ollama では必須 |
+| `--summary-ollama-url` | `http://127.0.0.1:11434` | 既存 Ollama server の URL (loopback のみ) |
 
 更新のきっかけは「前回から **90 秒**以上経っていて、確定行が **8 行**以上たまった」とき。
 未処理の発言があれば遅くとも **180 秒**で更新します。ただし最初の要約は、
 予告や挨拶だけで作らないよう確定行を最低 **3 行**待ちます。
-**発言が無い間は AI を呼びません。** 会議開始の直後にも呼びません。
+**発言が無い間は要約生成を呼びません。** Ollama を明示選択した場合のみ、
+モデル準備と会議中の保持更新を背景で行います。
 AI は発言ごとに項目を増やすのではなく、同じ話題や繰り返しを統合して
 会議ボード全体を書き直します。
 
@@ -586,14 +588,44 @@ AI は発言ごとに項目を増やすのではなく、同じ話題や繰り�
 ```yaml
 summary:
   enabled: true
-  provider: claude            # プリセットは claude のみ
-  model: ""                   # 省略時は CLI の既定
-  command: []                 # 指定すると provider より優先（配列で渡す）
+  provider: claude            # 既定。ollama は明示指定
+  model: ""                   # Claude では省略時に CLI の既定
+  # ollama_url: http://127.0.0.1:11434
+  command: []                 # ollama と併用不可
   min_new_lines: 8
   min_interval: 90s
   max_interval: 180s
   max_chars: 2000
 ```
+
+ローカル要約を試す場合は、Ollama server とモデルを別途用意してから明示します。
+録音開始はモデルのロードを待ちません。準備中は未反映の発言を保持し、
+`get_status` の `summary.readiness` が `loading` / `ready` / `failed` に変わります。
+`summary.state` は要約処理そのものの状態です。
+
+```sh
+sokki --summary-provider ollama --summary-model 'qwen3.5:9b' \
+  --summary-ollama-url http://127.0.0.1:11434
+```
+
+YAML では `summary.provider: ollama`、`summary.model: qwen3.5:9b`、
+`summary.ollama_url: http://127.0.0.1:11434` を指定します。
+設定の優先順位は明示した CLI フラグ、YAML、既定値の順です。
+戻す場合は `--summary-provider claude --summary-model ""`、または YAML の
+`provider: claude` と `model: ""` を指定します。YAML に Ollama のモデル名が
+残ると Claude CLI にも渡るため、モデル名も一緒に戻します。
+Ollama 選択時はモデル名が必須で、`summary.command` との併用はエラーです。
+`--auto-summary=false` のときは Ollama にアクセスしません。
+
+Ollama へは `think:false`、JSON schema、temperature 0、seed 42、context 16384、
+出力上限 4096 token を指定します。要約 HTTP は最大 60 秒、背景準備は最大 120 秒です。
+`keep_alive: 5m` で会議中は約 4 分ごとに保持を更新しますが、server 側の期限や
+他アプリの使用状況によって再ロードが生じ得るため、常時 ready や一定の応答時間は保証しません。
+終了時はこの会議の更新通信だけを止め、共有 Ollama のモデルを強制 unload しません。
+その後は server の TTL で解放されます。準備失敗・応答失敗時も録音は続き、
+発言は未反映のまま残り、Claude への自動切替は行いません。
+準備中に録音を止めた場合は保存後に準備をキャンセルし、最終要約を再ロードせず
+`summary.final_state: failed` と理由を表示します。
 
 > プロバイダーを起動できない場合（コマンドが無い、未対応の provider など）は、
 > **自動要約だけを無効にして録音を続けます**。pane の見出しと `start_or_attach`
@@ -605,7 +637,8 @@ summary:
 > `codex` はツールを無効にした実行形を確認できていないため、プリセットとしては選べません。
 > 任意のコマンドを使う場合は設定ファイルの `summary.command` に配列で指定します。
 
-失敗したときは反映位置を進めず、間隔を空けて再試行します。
+要約生成に失敗したときは反映位置を進めず、間隔を空けて再試行します。
+Ollama の背景準備または保持更新が失敗した場合は、自動再ロードしません。
 文字起こしは影響を受けません。状態は `get_status` の `summary` で確認できます。
 
 録音を止めると、確定行の保存を終えてから**最終要約**を 1 回行います。

@@ -69,6 +69,7 @@ type Config struct {
 	SummaryProvider string
 	SummaryCommand  []string
 	SummaryModel    string
+	OllamaURL       string
 	SummaryMinLines int
 	SummaryMinWait  time.Duration
 	SummaryMaxWait  time.Duration
@@ -105,6 +106,7 @@ func Default() Config {
 		ShowBoard:       true,
 		AutoSummary:     DefaultAutoSummary,
 		SummaryProvider: "claude",
+		OllamaURL:       "http://127.0.0.1:11434",
 		SummaryMinLines: 8,
 		SummaryMinWait:  90 * time.Second,
 		SummaryMaxWait:  180 * time.Second,

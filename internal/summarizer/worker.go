@@ -78,15 +78,25 @@ func DefaultConfig() Config {
 
 // Status はワーカーの現在の状態 (get_status 用)。
 type Status struct {
-	Enabled      bool      `json:"enabled"`
-	State        State     `json:"state"`
-	Provider     string    `json:"provider,omitempty"`
-	Version      int       `json:"version"`
-	PendingLines int       `json:"pending_lines"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
-	LastError    string    `json:"last_error,omitempty"`
-	Failures     int       `json:"consecutive_failures"`
-	FinalState   State     `json:"final_state,omitempty"`
+	Enabled        bool      `json:"enabled"`
+	State          State     `json:"state"`
+	Provider       string    `json:"provider,omitempty"`
+	Readiness      string    `json:"readiness,omitempty"`
+	ReadinessError string    `json:"readiness_error,omitempty"`
+	Version        int       `json:"version"`
+	PendingLines   int       `json:"pending_lines"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+	LastError      string    `json:"last_error,omitempty"`
+	Failures       int       `json:"consecutive_failures"`
+	FinalState     State     `json:"final_state,omitempty"`
+}
+
+type readinessProvider interface {
+	Readiness() (string, error)
+	ReadyDone() <-chan struct{}
+	CancelPreloadIfLoading()
+	StopBackground()
+	Close()
 }
 
 // Worker は確定行から会議ボードを自動更新する。
@@ -133,6 +143,13 @@ func (w *Worker) Status() Status {
 	w.mu.Lock()
 	s := w.status
 	w.mu.Unlock()
+	if p, ok := w.provider.(readinessProvider); ok {
+		var err error
+		s.Readiness, err = p.Readiness()
+		if err != nil {
+			s.ReadinessError = err.Error()
+		}
+	}
 
 	snap := w.src.SummarySnapshot()
 	if n := snap.Total - snap.AppliedThrough; n > 0 {
@@ -172,12 +189,37 @@ func (w *Worker) Run(ctx context.Context) {
 
 // Stop はループを止める (最終要約は別に呼ぶ)。
 func (w *Worker) Stop() {
+	if p, ok := w.provider.(readinessProvider); ok {
+		p.CancelPreloadIfLoading()
+		p.StopBackground()
+	}
 	w.stopOnce.Do(func() { close(w.stopped) })
 	<-w.done
 }
 
+// ReadyDone closes after background preload succeeds or fails; nil for CLI providers.
+func (w *Worker) ReadyDone() <-chan struct{} {
+	if p, ok := w.provider.(readinessProvider); ok {
+		return p.ReadyDone()
+	}
+	return nil
+}
+
+// CloseProvider stops background refresh after the final summary.
+func (w *Worker) CloseProvider() {
+	if p, ok := w.provider.(readinessProvider); ok {
+		p.Close()
+	}
+}
+
 // shouldRun は更新すべきかを判定する。
 func (w *Worker) shouldRun() bool {
+	if p, ok := w.provider.(readinessProvider); ok {
+		ready, _ := p.Readiness()
+		if ready != "ready" {
+			return false
+		}
+	}
 	// Source は mutex の外で読む (ロック順を worker.mu → live.mu にしない)。
 	snap := w.src.SummarySnapshot()
 
@@ -307,6 +349,17 @@ func (w *Worker) Final(ctx context.Context) State {
 	if len(snap.Lines) == 0 {
 		w.setFinal(StateDone)
 		return StateDone
+	}
+	if p, ok := w.provider.(readinessProvider); ok {
+		ready, err := p.Readiness()
+		if ready != "ready" {
+			if err == nil {
+				err = fmt.Errorf("Ollama モデルを準備中のため最終要約を実施しません")
+			}
+			w.fail(err)
+			w.setFinal(StateFailed)
+			return StateFailed
+		}
 	}
 	timeout := w.cfg.FinalTimeout
 	if timeout <= 0 {

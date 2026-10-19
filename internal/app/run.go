@@ -149,8 +149,19 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		con.Info("自動要約     : 無効 (文字起こしは続行します)")
 	}
 	if worker != nil {
-		con.Info("自動要約     : %s (%d 行 / %v ごと)",
-			cfg.SummaryProvider, cfg.SummaryMinLines, cfg.SummaryMinWait)
+		con.Info("自動要約     : %s (%d 行 / %v ごと)", cfg.SummaryProvider, cfg.SummaryMinLines, cfg.SummaryMinWait)
+		if ready := worker.ReadyDone(); ready != nil {
+			con.Info("要約モデル   : %s を背景準備中 (録音は継続)", cfg.SummaryModel)
+			go func() {
+				<-ready
+				status := worker.Status()
+				if status.Readiness == "ready" {
+					con.Info("要約モデル   : ready (%s)", cfg.SummaryModel)
+				} else {
+					con.Warn("要約モデル   : failed: %s (未反映発言を保持)", status.ReadinessError)
+				}
+			}()
+		}
 		workerCtx, cancelWorker := context.WithCancel(context.Background())
 		defer cancelWorker()
 		go worker.Run(workerCtx)
@@ -242,9 +253,15 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 
 	if worker != nil {
 		worker.Stop()
-		con.Info("最後の要約を作成しています...")
+		if worker.Status().Readiness == "" || worker.Status().Readiness == "ready" {
+			con.Info("最後の要約を作成しています...")
+		}
 		state := worker.Final(context.Background())
 		con.Info("最終要約     : %s", state)
+		if state == "failed" {
+			con.Warn("最終要約理由 : %s (未反映発言を保持)", worker.Status().LastError)
+		}
+		worker.CloseProvider()
 		if rec != nil {
 			rec.FinalSummary = string(state)
 		}

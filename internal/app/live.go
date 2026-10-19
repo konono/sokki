@@ -327,6 +327,12 @@ func summaryToMap(s summarizer.Status) map[string]any {
 	if s.Provider != "" {
 		out["provider"] = s.Provider
 	}
+	if s.Readiness != "" {
+		out["readiness"] = s.Readiness
+	}
+	if s.ReadinessError != "" {
+		out["readiness_error"] = s.ReadinessError
+	}
 	if !s.UpdatedAt.IsZero() {
 		out["updated_at"] = s.UpdatedAt.Format(time.RFC3339)
 	}

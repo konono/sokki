@@ -18,9 +18,10 @@ var yamlBackedFlags = map[string]func(dst, src *Config){
 	// 自動要約も設定ファイルで指定できるので、
 	// 明示したフラグのときだけ上書きする。
 	// 無条件に写すと YAML の値が既定値で潰れる。
-	"auto-summary":     func(dst, src *Config) { dst.AutoSummary = src.AutoSummary },
-	"summary-provider": func(dst, src *Config) { dst.SummaryProvider = src.SummaryProvider },
-	"summary-model":    func(dst, src *Config) { dst.SummaryModel = src.SummaryModel },
+	"auto-summary":       func(dst, src *Config) { dst.AutoSummary = src.AutoSummary },
+	"summary-provider":   func(dst, src *Config) { dst.SummaryProvider = src.SummaryProvider },
+	"summary-model":      func(dst, src *Config) { dst.SummaryModel = src.SummaryModel },
+	"summary-ollama-url": func(dst, src *Config) { dst.OllamaURL = src.OllamaURL },
 }
 
 // Resolve は「明示した CLI フラグ > YAML > 既定値」の優先順位で設定を決める。

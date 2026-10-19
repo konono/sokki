@@ -55,6 +55,7 @@ type SummarySection struct {
 	Enabled     *boolValue `yaml:"enabled"`
 	Provider    *strValue  `yaml:"provider"`
 	Model       *strValue  `yaml:"model"`
+	OllamaURL   *strValue  `yaml:"ollama_url"`
 	Command     []strValue `yaml:"command"`
 	MinNewLines *intValue  `yaml:"min_new_lines"`
 	MinInterval *strValue  `yaml:"min_interval"`
@@ -272,6 +273,7 @@ func (f *File) Apply(cfg *Config) {
 		}
 		setString(sm.Provider, &cfg.SummaryProvider)
 		setString(sm.Model, &cfg.SummaryModel)
+		setString(sm.OllamaURL, &cfg.OllamaURL)
 		if len(sm.Command) > 0 {
 			cmd := make([]string, 0, len(sm.Command))
 			for i := range sm.Command {
@@ -337,7 +339,7 @@ var nonNullKeys = map[string][]string{
 	"capture":       {"device", "type"},
 	"transcription": {"language", "backend", "final_strategy", "qwen_python", "qwen_model"},
 	"output":        {"directory"},
-	"summary": {"enabled", "provider", "min_new_lines",
+	"summary": {"enabled", "provider", "ollama_url", "min_new_lines",
 		"min_interval", "max_interval", "max_chars"},
 }
 
