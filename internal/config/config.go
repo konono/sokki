@@ -75,6 +75,9 @@ type Config struct {
 	SummaryMaxWait  time.Duration
 	SummaryMaxChars int
 
+	// Optional English-to-Japanese live translation. Empty means disabled.
+	TranslateMode string
+
 	// 診断
 	Verbose bool
 }

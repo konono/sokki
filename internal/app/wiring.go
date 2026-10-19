@@ -23,23 +23,37 @@ import (
 // 非 TTY と自動要約なしの手動実行は従来どおりの行出力を保つ。
 func newView(con *ui.Console, cfg config.Config) *view {
 	v := &view{con: con, autoSummary: cfg.AutoSummary}
-	if !con.IsTTY() || !cfg.ShowBoard || cfg.PaneRole == "" && !cfg.AutoSummary {
+	if cfg.TranslateMode != "" {
+		v.display = newAsyncTranslationView()
+	}
+	if !con.IsTTY() || cfg.TranslateMode == "" && (!cfg.ShowBoard || cfg.PaneRole == "" && !cfg.AutoSummary) {
 		return v
 	}
 	rows, cols := ui.TermSize()
 	v.split = ui.NewSplit(os.Stdout, rows, cols, con.Color())
+	if cfg.TranslateMode != "" && !cfg.ShowBoard {
+		v.split.SetLogOnly(true)
+	}
 	return v
 }
 
 // Start は分割表示を開始し、端末サイズの変化を追従し始める。
 func (v *view) Start() {
 	if v.split == nil {
+		if v.display != nil {
+			v.plain = v.con.Fork()
+			v.con.Redirect(asyncConsoleSink{a: v.display, plain: v.plain})
+		}
 		return
 	}
 	v.split.Start()
 	// 分割表示中は Console の直接出力を画面へ流さない
 	// (画面全体がスクロールし、差分描画では位置を戻せないため)。
-	v.con.Redirect(v.split)
+	if v.display != nil {
+		v.con.Redirect(asyncSplitSink{a: v.display, split: v.split})
+	} else {
+		v.con.Redirect(v.split)
+	}
 	v.split.SetAutoSummary(v.autoSummary)
 	v.split.SetBoard((&board.Board{}).LinesFor(v.autoSummary))
 	v.watchResize()
@@ -60,7 +74,11 @@ func (v *view) watchResize() {
 	go func() {
 		for range ch {
 			rows, cols := ui.TermSize()
-			v.split.Resize(rows, cols)
+			if v.display != nil {
+				v.display.enqueue(func() { v.split.Resize(rows, cols) })
+			} else {
+				v.split.Resize(rows, cols)
+			}
 		}
 	}()
 }
@@ -81,6 +99,13 @@ func (v *view) watchKeys() {
 //
 // 操作対象は Tab で切り替え、移動はその領域に効く。
 func (v *view) onKey(k ui.Key) {
+	if v.display != nil {
+		v.display.enqueue(func() { v.onKeyNow(k) })
+		return
+	}
+	v.onKeyNow(k)
+}
+func (v *view) onKeyNow(k ui.Key) {
 	if v.split == nil {
 		return
 	}
@@ -106,6 +131,10 @@ func (v *view) onKey(k ui.Key) {
 	}
 }
 
+// displayDrainLimit bounds terminal output at process exit. A healthy terminal
+// finishes the final status and TTY restoration; a held writer cannot hang Stop.
+const displayDrainLimit = 2 * time.Second
+
 // Stop は分割表示を解除する。
 func (v *view) Stop() {
 	// 入力モードの復元を最優先にする (以降の処理が失敗しても端末を戻す)。
@@ -116,6 +145,21 @@ func (v *view) Stop() {
 	if v.stopResize != nil {
 		v.stopResize()
 		v.stopResize = nil
+	}
+	if v.display != nil {
+		v.display.closeAfter(func() {
+			v.con.Redirect(nil)
+			if v.split != nil {
+				v.split.Stop()
+			}
+		})
+		timer := time.NewTimer(displayDrainLimit)
+		defer timer.Stop()
+		select {
+		case <-v.display.done:
+		case <-timer.C:
+		}
+		return
 	}
 	if v.split != nil {
 		v.con.Redirect(nil)
@@ -203,8 +247,12 @@ func absPath(p string) string {
 func (v *view) setAutoSummary(on bool) {
 	v.autoSummary = on
 	if v.split != nil {
-		v.split.SetAutoSummary(on)
-		v.split.SetBoard((&board.Board{}).LinesFor(on))
+		if v.display != nil {
+			v.display.enqueue(func() { v.split.SetAutoSummary(on); v.split.SetBoard((&board.Board{}).LinesFor(on)) })
+		} else {
+			v.split.SetAutoSummary(on)
+			v.split.SetBoard((&board.Board{}).LinesFor(on))
+		}
 	}
 }
 

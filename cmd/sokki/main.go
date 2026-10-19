@@ -73,6 +73,10 @@ func main() {
 		"自動要約に使う AI (claude / ollama。その他は summary.command で指定)")
 	fs.StringVar(&cfg.SummaryModel, "summary-model", "", "自動要約のモデル (省略時は CLI の既定)")
 	fs.StringVar(&cfg.OllamaURL, "summary-ollama-url", cfg.OllamaURL, "要約用の既存 Ollama server URL (loopback のみ)")
+	fs.StringVar(&cfg.TranslateMode, "translate", "", "ライブ翻訳: en-ja (既定: 無効)")
+	fs.StringVar(&cfg.SummaryProvider, "llm-provider", cfg.SummaryProvider, "要約と翻訳に共通の AI (claude / ollama)")
+	fs.StringVar(&cfg.SummaryModel, "llm-model", "", "要約と翻訳に共通のモデル")
+	fs.StringVar(&cfg.OllamaURL, "llm-ollama-url", cfg.OllamaURL, "共通の Ollama server URL (loopback のみ)")
 	fs.DurationVar(&cfg.SilenceHangover, "silence", cfg.SilenceHangover, "この長さの無音で発話を確定する")
 	fs.DurationVar(&cfg.InterimAfter, "interim-after", cfg.InterimAfter,
 		"発話開始から最初の暫定表示までの時間")
@@ -113,6 +117,11 @@ func main() {
 	if err != nil {
 		// AI から起動された場合は、設定エラーも会議記録に残す
 		// (記録が無いと AI が原因を取得できず待ち続ける)。
+		recordStartupFailure(cfg, err)
+		fmt.Fprintf(os.Stderr, "エラー: %v\n", err)
+		os.Exit(1)
+	}
+	if err := config.ValidateLLMFlags(fs); err != nil {
 		recordStartupFailure(cfg, err)
 		fmt.Fprintf(os.Stderr, "エラー: %v\n", err)
 		os.Exit(1)

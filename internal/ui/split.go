@@ -39,7 +39,9 @@ type Split struct {
 	// 本文 + 1 行あたり数バイトに収まる。
 	logRaw []string
 	// logEnds は各行までの折り返し後の累計行数 (二分探索用)。
-	logEnds []int
+	logEnds   []int
+	unitSlots map[int]int
+	logOnly   bool
 
 	// interimRaw は確定前の暫定行 (折り返し前)。
 	interimRaw string
@@ -100,7 +102,7 @@ type wrapped struct {
 
 // NewSplit は分割表示を作る。rows / cols は端末の大きさ。
 func NewSplit(out io.Writer, rows, cols int, color bool) *Split {
-	s := &Split{out: out, color: color}
+	s := &Split{out: out, color: color, unitSlots: make(map[int]int)}
 	s.setSize(rows, cols)
 	s.logView = viewport{follow: true}
 	s.boardView = viewport{follow: true}
@@ -119,6 +121,9 @@ func (s *Split) setSize(rows, cols int) {
 
 // layout は上下の領域の行数を返す (見出しを含む)。
 func (s *Split) layout() (logH, boardH int) {
+	if s.logOnly {
+		return s.rows, 0
+	}
 	if s.rows < minRegionRows*2 {
 		// 極端に低い端末では双方が見える範囲まで縮める。
 		logH = s.rows / 2
@@ -142,6 +147,16 @@ func (s *Split) layout() (logH, boardH int) {
 		logH = s.rows - boardH
 	}
 	return logH, boardH
+}
+
+// SetLogOnly uses the full terminal for updatable translation units.
+func (s *Split) SetLogOnly(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logOnly = on
+	s.focus = focusLog
+	s.frame = nil
+	s.render()
 }
 
 // Start は分割表示を開始する。
@@ -207,11 +222,59 @@ func (s *Split) Log(line string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.logRaw = append(s.logRaw, line)
-	s.logEnds = append(s.logEnds, s.logTotalRows()+len(WrapToWidth(line, s.cols)))
+	s.logEnds = append(s.logEnds, s.logTotalRows()+len(wrapLog(line, s.cols)))
 	// 確定行が出た時点で、その発話の暫定行は役目を終えている。
 	// 消さないと古い暫定と確定行が並んで見える。
 	s.interimRaw = ""
 	s.render()
+}
+
+// UpsertUnit replaces the same speech unit without appending another speech row.
+// When scrolled away from the end, its content anchor survives height changes.
+func (s *Split) UpsertUnit(id int, line string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, exists := s.unitSlots[id]
+	if !exists {
+		s.unitSlots[id] = len(s.logRaw)
+		s.logRaw = append(s.logRaw, line)
+		s.logEnds = append(s.logEnds, s.logTotalRows()+len(wrapLog(line, s.cols)))
+		s.interimRaw = ""
+		s.render()
+		return
+	}
+	anchor := s.logLineAt(s.logView.top)
+	offset := 0
+	if anchor >= 0 {
+		offset = s.logView.top - s.logRowOf(anchor)
+	}
+	oldRows := s.logEnds[idx] - s.logRowOf(idx)
+	s.logRaw[idx] = line
+	newRows := len(wrapLog(line, s.cols))
+	delta := newRows - oldRows
+	for i := idx; i < len(s.logEnds); i++ {
+		s.logEnds[i] += delta
+	}
+	if !s.logView.follow {
+		switch {
+		case anchor > idx:
+			s.logView.top += delta
+		case anchor == idx:
+			if offset >= newRows {
+				offset = newRows - 1
+			}
+			s.logView.top = s.logRowOf(idx) + offset
+		}
+	}
+	s.render()
+}
+
+func wrapLog(line string, cols int) []string {
+	var out []string
+	for _, part := range strings.Split(line, "\n") {
+		out = append(out, WrapToWidth(part, cols)...)
+	}
+	return out
 }
 
 // Interim は確定前の暫定行を発言ログの末尾に出す。
@@ -286,6 +349,9 @@ func (s *Split) rebuildBoardWrap() {
 func (s *Split) FocusNext() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.logOnly {
+		return
+	}
 	if s.focus == focusLog {
 		s.focus = focusBoard
 	} else {
@@ -413,7 +479,7 @@ func (s *Split) rebuildLogEnds() {
 	s.logEnds = s.logEnds[:0]
 	total := 0
 	for _, line := range s.logRaw {
-		total += len(WrapToWidth(line, s.cols))
+		total += len(wrapLog(line, s.cols))
 		s.logEnds = append(s.logEnds, total)
 	}
 }
@@ -465,7 +531,7 @@ func (s *Split) logRowsFrom(from, n int) []string {
 		if line < 0 {
 			break
 		}
-		wrapped := WrapToWidth(s.logRaw[line], s.cols)
+		wrapped := wrapLog(s.logRaw[line], s.cols)
 		off := row - s.logRowOf(line)
 		for i := off; i < len(wrapped) && len(out) < n; i++ {
 			out = append(out, wrapped[i])
@@ -614,7 +680,11 @@ func (s *Split) header(target focusTarget, total, height int) string {
 
 	right := ""
 	if focused {
-		right = "Tab 切替 j/k 行 PgUp/PgDn 頁 g/G 先頭末尾 "
+		if s.logOnly {
+			right = "j/k 行 PgUp/PgDn 頁 g/G 先頭末尾 "
+		} else {
+			right = "Tab 切替 j/k 行 PgUp/PgDn 頁 g/G 先頭末尾 "
+		}
 	}
 	gap := s.cols - DisplayWidth(left) - DisplayWidth(right)
 	if gap < 1 {

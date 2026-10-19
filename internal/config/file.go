@@ -32,6 +32,8 @@ type File struct {
 	Transcription *TranscriptionSection `yaml:"transcription"`
 	Output        *OutputSection        `yaml:"output"`
 	Summary       *SummarySection       `yaml:"summary"`
+	LLM           *LLMSection           `yaml:"llm"`
+	Translation   *TranslationSection   `yaml:"translation"`
 }
 
 // CaptureSection は入力の設定。
@@ -61,6 +63,18 @@ type SummarySection struct {
 	MinInterval *strValue  `yaml:"min_interval"`
 	MaxInterval *strValue  `yaml:"max_interval"`
 	MaxChars    *intValue  `yaml:"max_chars"`
+}
+
+// TranslationSection configures optional live English-to-Japanese translation.
+type TranslationSection struct {
+	Mode *strValue `yaml:"mode"`
+}
+
+// LLMSection selects a single provider and model for enabled AI features.
+type LLMSection struct {
+	Provider  *strValue `yaml:"provider"`
+	Model     *strValue `yaml:"model"`
+	OllamaURL *strValue `yaml:"ollama_url"`
 }
 
 // OutputSection は保存の設定。
@@ -199,6 +213,20 @@ func (f *File) validate(path string) error {
 			}
 		}
 	}
+	if tr := f.Translation; tr != nil {
+		if err := requireNonBlank(path, "translation.mode", tr.Mode); err != nil {
+			return err
+		}
+
+	}
+	if llm := f.LLM; llm != nil {
+		if err := requireNonBlank(path, "llm.provider", llm.Provider); err != nil {
+			return err
+		}
+		if err := requireNonBlank(path, "llm.ollama_url", llm.OllamaURL); err != nil {
+			return err
+		}
+	}
 	return f.validateCaptureType(path)
 }
 
@@ -290,6 +318,16 @@ func (f *File) Apply(cfg *Config) {
 		setDuration(sm.MinInterval, &cfg.SummaryMinWait)
 		setDuration(sm.MaxInterval, &cfg.SummaryMaxWait)
 	}
+	if tr := f.Translation; tr != nil {
+		setString(tr.Mode, &cfg.TranslateMode)
+	}
+	// Canonical llm fields override only their corresponding legacy aliases.
+	// An explicit empty model resets summary.model for Claude.
+	if llm := f.LLM; llm != nil {
+		setString(llm.Provider, &cfg.SummaryProvider)
+		setString(llm.Model, &cfg.SummaryModel)
+		setString(llm.OllamaURL, &cfg.OllamaURL)
+	}
 }
 
 // setDuration は時間の文字列を反映する (検証は validate 済み)。
@@ -338,6 +376,7 @@ func configHint() string {
 var nonNullKeys = map[string][]string{
 	"capture":       {"device", "type"},
 	"transcription": {"language", "backend", "final_strategy", "qwen_python", "qwen_model"},
+	"translation":   {"mode", "model", "ollama_url"},
 	"output":        {"directory"},
 	"summary": {"enabled", "provider", "ollama_url", "min_new_lines",
 		"min_interval", "max_interval", "max_chars"},

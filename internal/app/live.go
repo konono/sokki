@@ -12,6 +12,7 @@ import (
 	"github.com/konono/sokki/internal/session"
 	"github.com/konono/sokki/internal/summarizer"
 	"github.com/konono/sokki/internal/transcript"
+	"github.com/konono/sokki/internal/translation"
 	"github.com/konono/sokki/internal/ui"
 )
 
@@ -37,7 +38,8 @@ type live struct {
 
 	stopOnce func()
 	// summaryStatus は自動要約の状態を返す (未使用なら nil)。
-	summaryStatus func() summarizer.Status
+	summaryStatus     func() summarizer.Status
+	translationStatus func() translation.Status
 	// done は録音プロセスがドレインを終え、保存ファイルを閉じたら閉じる。
 	done chan struct{}
 	// finished は終了処理の結果 (保存に失敗した場合の理由)。
@@ -144,6 +146,7 @@ func (l *live) status() ipc.Response {
 	r.Interim = l.interim
 	r.InterimAt = l.interimAt
 	statusFn := l.summaryStatus
+	translationFn := l.translationStatus
 	l.mu.RUnlock()
 
 	cur := l.boards.Current()
@@ -156,6 +159,10 @@ func (l *live) status() ipc.Response {
 	// ロック順が循環して詰まる (addLine の書き込み待ちで顕在化する)。
 	if statusFn != nil {
 		r.Summary = summaryToMap(statusFn())
+	}
+	if translationFn != nil {
+		s := translationFn()
+		r.Translation = map[string]any{"readiness": s.Readiness, "readiness_error": s.ReadinessError, "units": s.Units, "pending": s.Pending, "failed": s.Failed, "untranslated": s.Untranslated, "unsaved": s.Unsaved, "storage_error": s.StorageError}
 	}
 	return r
 }
@@ -354,31 +361,110 @@ type view struct {
 	// keys はキー入力の読み取り (端末の入力モードを変更する)。
 	keys *ui.Keys
 	// autoSummary は自動要約が有効か (表示の文言に使う)。
-	autoSummary bool
+	autoSummary      bool
+	translationShown map[int]uint64
+	display          *asyncTranslationView
+	plain            *ui.Console
+}
+
+// Translation renders one stable TTY slot; non-TTY output is explicitly revisioned.
+func (v *view) Translation(u translation.Unit) {
+	if v.display != nil {
+		v.display.enqueue(func() { v.translationNow(u) })
+		return
+	}
+	v.translationNow(u)
+}
+
+func (v *view) translationNow(u translation.Unit) {
+	if v.translationShown == nil {
+		v.translationShown = make(map[int]uint64)
+	}
+	if v.translationShown[u.ID] >= u.Seq {
+		return
+	}
+	v.translationShown[u.ID] = u.Seq
+	var b strings.Builder
+	if v.split != nil {
+		fmt.Fprintf(&b, "[翻訳 unit=%d v%d source=%v %s]", u.ID, u.Version, u.SourceIndices, u.State)
+	} else {
+		fmt.Fprintf(&b, "[translation unit=%d version=%d sources=%v state=%s]", u.ID, u.Version, u.SourceIndices, u.State)
+	}
+	if u.Closed {
+		fmt.Fprintf(&b, " closed=%s", u.CloseReason)
+	}
+	if u.Japanese != "" {
+		fmt.Fprintf(&b, "\nJA: %s", safeTranslationDisplay(u.Japanese))
+	} else if u.Error != "" {
+		fmt.Fprintf(&b, "\nJA: （未訳: %s）", safeTranslationDisplay(u.Error))
+	} else {
+		b.WriteString("\nJA: （待機中）")
+	}
+	for _, source := range u.Source {
+		fmt.Fprintf(&b, "\nEN: %s", safeTranslationDisplay(source))
+	}
+	if v.split != nil {
+		v.split.UpsertUnit(u.ID, b.String())
+	} else {
+		v.outputConsole().Final(b.String())
+	}
+}
+
+func safeTranslationDisplay(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' {
+			return r
+		}
+		if r < 32 || r == 127 {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func (v *view) Log(line string) {
+	if v.display != nil {
+		v.display.enqueue(func() { v.logNow(line) })
+		return
+	}
+	v.logNow(line)
+}
+func (v *view) logNow(line string) {
 	if v.split != nil {
 		v.split.Log(line)
 		return
 	}
-	v.con.Final(line)
+	v.outputConsole().Final(line)
 }
 
 func (v *view) Interim(line string) {
+	if v.display != nil {
+		v.display.enqueue(func() { v.interimNow(line) })
+		return
+	}
+	v.interimNow(line)
+}
+func (v *view) interimNow(line string) {
 	if v.split != nil {
 		v.split.Interim(line)
 		return
 	}
-	v.con.Interim(line)
+	v.outputConsole().Interim(line)
 }
 
 func (v *view) ClearInterim() {
+	if v.display != nil {
+		v.display.enqueue(func() { v.clearinterimNow() })
+		return
+	}
+	v.clearinterimNow()
+}
+func (v *view) clearinterimNow() {
 	if v.split != nil {
 		v.split.ClearInterim()
 		return
 	}
-	v.con.ClearInterim()
+	v.outputConsole().ClearInterim()
 }
 
 // Info は補助メッセージを出す。
@@ -386,23 +472,45 @@ func (v *view) ClearInterim() {
 // 分割表示中は発言ログ領域へ流す (別経路で書くと、
 // 会議ボードの描画と混ざって表示が崩れる)。
 func (v *view) Info(format string, args ...any) {
+	if v.display != nil {
+		v.display.enqueue(func() { v.infoNow(format, args...) })
+		return
+	}
+	v.infoNow(format, args...)
+}
+func (v *view) infoNow(format string, args ...any) {
 	if v.split != nil {
 		v.split.Log(fmt.Sprintf(format, args...))
 		return
 	}
-	v.con.Info(format, args...)
+	v.outputConsole().Info(format, args...)
 }
 
 // Warn は警告を出す。分割表示中は発言ログ領域へ流す。
 func (v *view) Warn(format string, args ...any) {
+	if v.display != nil {
+		v.display.enqueue(func() { v.warnNow(format, args...) })
+		return
+	}
+	v.warnNow(format, args...)
+}
+func (v *view) warnNow(format string, args ...any) {
 	if v.split != nil {
 		v.split.Log("警告: " + fmt.Sprintf(format, args...))
 		return
 	}
-	v.con.Warn(format, args...)
+	v.outputConsole().Warn(format, args...)
 }
 
 func (v *view) SetBoard(lines []string) {
+	if v.display != nil {
+		copyLines := append([]string(nil), lines...)
+		v.display.enqueue(func() { v.setboardNow(copyLines) })
+		return
+	}
+	v.setboardNow(lines)
+}
+func (v *view) setboardNow(lines []string) {
 	if v.split != nil {
 		v.split.SetBoard(lines)
 	}
@@ -410,6 +518,13 @@ func (v *view) SetBoard(lines []string) {
 
 // setBoardOf は会議ボードの版と内容をまとめて反映する。
 func (v *view) setBoardOf(b board.Board) {
+	if v.display != nil {
+		v.display.enqueue(func() { v.setBoardOfNow(b) })
+		return
+	}
+	v.setBoardOfNow(b)
+}
+func (v *view) setBoardOfNow(b board.Board) {
 	if v.split == nil {
 		return
 	}
@@ -431,3 +546,10 @@ func splitLine(line string) (at, text string) {
 
 // offsetString は時刻を HH:MM:SS にする。
 func offsetString(d time.Duration) string { return transcript.FormatOffset(d) }
+
+func (v *view) outputConsole() *ui.Console {
+	if v.plain != nil {
+		return v.plain
+	}
+	return v.con
+}

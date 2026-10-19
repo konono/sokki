@@ -98,6 +98,17 @@ summary:
   # 要約本文の目安上限 (文字数)。
   max_chars: 2000
 
+# 英語会議の原文を保持しつつ、日本語訳を別ファイルとログに表示する場合だけ有効化。
+# translation:
+#   mode: en-ja
+# 共通LLMを選ぶ場合は以下を設定する (要約も同じprovider/model)。
+# llm:
+#   provider: ollama
+#   model: gemma4:e4b
+#   ollama_url: http://127.0.0.1:11434
+# 併せて transcription.backend: whisper / language: en を指定する。
+# 既存 Ollama daemon/model は利用者が別途用意する。自動取得しない。
+
 output:
   # 文字起こしの保存先ディレクトリ。
   # この下に YYYY-MM-DD_HHMMSS.txt が会議ごとに作られます。

@@ -408,6 +408,10 @@ transcription:
 | `--qwen-python` | — | Qwen 用の隔離 Python 実行ファイルの絶対パス |
 | `--qwen-model` | — | ローカル Qwen3-ASR BF16 モデルディレクトリの絶対パス |
 | `--lang`, `-l` | `ja` | 認識する言語（`ja` / `en` / `auto`）|
+| `--translate` | 無効 | ライブ翻訳を明示選択 (`en-ja` のみ) |
+| `--llm-provider` | `claude` | 要約と翻訳で共有する AI (`claude` / `ollama`) |
+| `--llm-model` | 空 | 共通モデル。Ollama では必須 |
+| `--llm-ollama-url` | `http://127.0.0.1:11434` | 共通の既存 Ollama server (数値loopbackのみ) |
 | `--out` | `transcripts` | 保存先ディレクトリ |
 | `--interim` | `true` | 暫定結果を表示する |
 | `--silence` | `500ms` | この長さの無音で発話を確定 |
@@ -468,6 +472,24 @@ transcription:
 
 一度確定してファイルに書いた行は、後から認識し直して修正することはしません。
 12 秒の上限で区切られた行も同様です。
+翻訳を有効にした場合も、この**英語原文**は変更せず、別の翻訳表示だけを更新します。
+
+### 英語会議を日本語へライブ翻訳する (明示選択)
+
+Whisper で英語を認識し、保存された確定原文だけを、共通設定で選んだ Claude または既存のローカル Ollama に渡します。Claude CLI の認証、または Ollama server とモデルは事前に利用者が用意してください。sokki は daemon 起動やモデル取得をしません。Qwen ASR はこの英語翻訳モードでは使えません。既存 YAML が Qwen に切り替わっている場合は、Whisper 用 `--model` も明示してください。
+
+```sh
+ollama list                             # モデルを確認 (別途 Ollama daemon を起動)
+./bin/sokki --backend whisper --lang en --translate en-ja \
+  --llm-provider ollama --llm-model 'gemma4:e4b' \
+  --llm-ollama-url http://127.0.0.1:11434
+```
+
+設定ファイルなら `transcription.backend: whisper`、`transcription.language: en` と、`translation.mode: en-ja`、`llm.provider: ollama`、`llm.model: gemma4:e4b` を指定します。優先順位は明示CLI > YAML > 既定値です。既定の翻訳は無効で、無効時には翻訳用 Ollama へ一切アクセスしません。戻す場合は `--translate ""`、または YAML の `translation` 節を削除します。要約と翻訳のprovider/modelは共通です。Ollama指定時は有効な要約も同じモデルを使います。翻訳だけを止めても共通設定は残ります。既存の `--summary-provider/model/ollama-url` と `summary.provider/model/ollama_url` は共通設定の別名として維持します。CLIの新旧同時指定は同じ項目ごとにエラーです。YAMLは `llm.*` が対応する `summary.*` より優先し、`llm.model: ""` は旧モデル値を明示的に消します。`summary.command` は翻訳有効時には使えません。
+
+原文は従来どおり `<会議>.txt` と IPC に保存されます。翻訳on時は日本語を主表示し、`EN:` に確定原文を併記します。別の `<会議>.ja.txt` に現在の訳と状態、`<会議>.translation.jsonl` にunit/versionの更新履歴を残します。確定原文1行で訳を開始し、次の確定行が最初の行の受領から15秒以内なら2行をまとめて訳し直します。2行目がなければ15秒または終了時にそのunitを閉じます。15秒は原文をまとめる期限で、訳が完成する期限ではありません。先行2原文は文脈だけに使い、訳す対象には含めません。
+
+TTYは同じunitの表示を更新し、非TTYはunit/version/state付きの追記で改訂を示します。読み込み中・失敗・終了期限超過でも英語原文と未訳理由を残し、録音と原文保存は続きます。モデル準備は録音開始後の背景処理です。通常の翻訳通信は最大60秒、録音終了後の翻訳待ちは原文EOFから最大30秒です。Claude は安全なCLIプリセットでツール・MCP・セッション履歴を使わず、readinessは実行ファイルの存在のみで認証成功を保証しません。Ollama の `keep_alive:5m` は会議中の常時メモリ保持を保証せず、長い無音の後に再ロードする場合があります。終了時に共有 Ollama モデルを強制unloadしません。
 
 ### 速さと正確さの調整
 
@@ -571,9 +593,9 @@ MCP の `start_or_attach` と手動 CLI で始めた会議は、**質問しな�
 | 設定 | 既定 | 意味 |
 |---|---|---|
 | `--auto-summary` | 有効 | 発言から会議ボードを自動更新 |
-| `--summary-provider` | `claude` | 要約に使う AI (`claude` / `ollama`) |
-| `--summary-model` | Claude CLI の既定 | モデル。Ollama では必須 |
-| `--summary-ollama-url` | `http://127.0.0.1:11434` | 既存 Ollama server の URL (loopback のみ) |
+| `--summary-provider` | `claude` | 共通 `--llm-provider` の互換別名 |
+| `--summary-model` | Claude CLI の既定 | 共通 `--llm-model` の互換別名。Ollama では必須 |
+| `--summary-ollama-url` | `http://127.0.0.1:11434` | 共通 `--llm-ollama-url` の互換別名 |
 
 更新のきっかけは「前回から **90 秒**以上経っていて、確定行が **8 行**以上たまった」とき。
 未処理の発言があれば遅くとも **180 秒**で更新します。ただし最初の要約は、

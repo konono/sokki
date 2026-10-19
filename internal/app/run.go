@@ -15,6 +15,7 @@ import (
 	"github.com/konono/sokki/internal/config"
 	"github.com/konono/sokki/internal/session"
 	"github.com/konono/sokki/internal/transcript"
+	"github.com/konono/sokki/internal/translation"
 	"github.com/konono/sokki/internal/ui"
 	"github.com/konono/sokki/internal/vad"
 	"github.com/konono/sokki/internal/whisper"
@@ -45,6 +46,9 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	}
 
 	if err := cfg.ValidateRecognition(); err != nil {
+		return fail(err)
+	}
+	if err := cfg.ValidateTranslation(); err != nil {
 		return fail(err)
 	}
 	if cfg.Backend == config.BackendWhisper {
@@ -83,6 +87,7 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	// 会議ボードと AI 連携 (MCP) のための状態・IPC を用意する。
 	boards := board.NewStore(writer.Path())
 	v := newView(con, cfg)
+	defer v.Stop() // also closes the async display on every early return
 	lv := newLive(cfg.SessionID, cfg.PaneRole, writer.Path(), start, boards, v)
 	stopAI, cancelAI := context.WithCancel(context.Background())
 	lv.stopOnce = cancelAI
@@ -125,11 +130,38 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		con.Info("会議 ID      : %s", rec.ID)
 		con.Info("会議ボード   : %s", boards.MarkdownPath())
 	}
+	con.Info("LLM 設定     : %s / model=%q / summary=%t / translation=%t", cfg.SummaryProvider, cfg.SummaryModel, cfg.AutoSummary, cfg.TranslateMode != "")
 	con.Info("録音を開始しました。Ctrl-C で終了します。")
 	con.Info("%s", "----------------------------------------")
 
 	v.Start()
-	defer v.Stop()
+	var translator *translation.Worker
+	if cfg.TranslateMode != "" {
+		translator, err = translation.NewWithProvider(cfg.SummaryProvider, cfg.SummaryModel, cfg.OllamaURL, writer.Path(), v.Translation, func(err error) {
+			v.Warn("翻訳sidecarの保存に失敗しました: %v (原文保存は継続)", err)
+		})
+		if err != nil {
+			v.Warn("翻訳の準備に失敗しました: %v (録音は継続)", err)
+			failure := err.Error()
+			lv.mu.Lock()
+			lv.translationStatus = func() translation.Status { return translation.Status{Readiness: "failed", ReadinessError: failure} }
+			lv.mu.Unlock()
+		} else {
+			lv.mu.Lock()
+			lv.translationStatus = translator.Status
+			lv.mu.Unlock()
+			v.Info("翻訳: en-ja / %s を背景準備中 (原文保存と録音は継続)", cfg.SummaryModel)
+			go func() {
+				<-translator.ReadyDone()
+				s := translator.Status()
+				if s.Readiness == "ready" {
+					v.Info("翻訳モデル: ready (%s)", cfg.SummaryModel)
+				} else {
+					v.Warn("翻訳モデル: failed: %s (原文は保持)", s.ReadinessError)
+				}
+			}()
+		}
+	}
 
 	// 自動要約ワーカー。AI クライアントの接続とは独立して動き、
 	// 確定発言がたまったら会議ボードを更新する。
@@ -194,7 +226,7 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		transcribeLoop(workCtx, cfg, client, writer, v, disp.events, lv, traceDir)
+		transcribeLoopTranslated(workCtx, cfg, client, writer, v, disp.events, lv, translator, traceDir)
 	}()
 
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -250,6 +282,12 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	// 保存完了を stop_session の待ち側へ知らせる。
 	// 最終要約はこの後に行い、結果は記録と get_status で確認する。
 	lv.markFinished(closeErr)
+	var translationDone chan translation.Status
+	if translator != nil {
+		deadline := translator.CloseSource() // absolute deadline starts at source EOF
+		translationDone = make(chan translation.Status, 1)
+		go func() { translationDone <- translator.Wait(deadline) }()
+	}
 
 	if worker != nil {
 		worker.Stop()
@@ -265,6 +303,14 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		if rec != nil {
 			rec.FinalSummary = string(state)
 		}
+	}
+	if translator != nil {
+		s := <-translationDone
+		v.Info("翻訳終了: %s", s.String())
+		if len(s.Unsaved) > 0 {
+			v.Warn("翻訳sidecar未保存 unit IDs: %v (原文.txtは保存済み)", s.Unsaved)
+		}
+		translator.Close()
 	}
 
 	con.Info("%s", "----------------------------------------")
@@ -386,6 +432,11 @@ func captureLoop(ctx context.Context, cap frameReader, seg *vad.Segmenter,
 // transcribeLoop は区間を順に文字起こしして表示・保存する。
 func transcribeLoop(ctx context.Context, cfg config.Config, client transcriber,
 	writer *transcript.Writer, con *view, events <-chan vad.Event, lv *live, traceDirs ...string) {
+	transcribeLoopTranslated(ctx, cfg, client, writer, con, events, lv, nil, traceDirs...)
+}
+
+func transcribeLoopTranslated(ctx context.Context, cfg config.Config, client transcriber,
+	writer *transcript.Writer, con *view, events <-chan vad.Event, lv *live, translator *translation.Worker, traceDirs ...string) {
 	traceDir := asrTraceDir()
 	if len(traceDirs) > 0 {
 		traceDir = traceDirs[0]
@@ -402,7 +453,7 @@ func transcribeLoop(ctx context.Context, cfg config.Config, client transcriber,
 		if ev.Kind == vad.Interim && len(events) > 0 {
 			continue
 		}
-		handleEventWithStrategy(ctx, client, writer, con, lv, ev, traceDir, cfg.FinalStrategy)
+		handleEventTranslated(ctx, client, writer, con, lv, ev, traceDir, cfg.FinalStrategy, translator)
 	}
 }
 
@@ -423,6 +474,11 @@ func handleEventWithTrace(ctx context.Context, client transcriber, writer *trans
 
 func handleEventWithStrategy(ctx context.Context, client transcriber, writer *transcript.Writer,
 	con *view, lv *live, ev vad.Event, traceDir, finalStrategy string) {
+	handleEventTranslated(ctx, client, writer, con, lv, ev, traceDir, finalStrategy, nil)
+}
+
+func handleEventTranslated(ctx context.Context, client transcriber, writer *transcript.Writer,
+	con *view, lv *live, ev vad.Event, traceDir, finalStrategy string, translator *translation.Worker) {
 	if ev.Kind != vad.Interim {
 		defer clearInterim(con, lv)
 	}
@@ -493,7 +549,11 @@ func handleEventWithStrategy(ctx context.Context, client transcriber, writer *tr
 		at, body := splitLine(line)
 		lv.addLine(at, body)
 	}
-	con.Log(line)
+	if translator != nil {
+		translator.Accept(writer.Count()-1, line)
+	} else {
+		con.Log(line)
+	}
 }
 
 // clearInterim は画面と AI 向けの暫定行を消す。

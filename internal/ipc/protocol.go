@@ -71,6 +71,8 @@ type Response struct {
 
 	// Summary は自動要約ワーカーの状態 (任意)。
 	Summary map[string]any `json:"summary,omitempty"`
+	// Translation reports optional live translation readiness and pending work.
+	Translation map[string]any `json:"translation,omitempty"`
 
 	// 会議ボード
 	Board          *board.Board `json:"board,omitempty"`

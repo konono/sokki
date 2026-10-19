@@ -164,3 +164,9 @@ func (c *Console) clearLine() {
 	}
 	c.interimLen = 0
 }
+
+// Fork creates an unredirected writer with the same output and terminal mode.
+// Translation-on uses it only on its single display goroutine.
+func (c *Console) Fork() *Console {
+	return &Console{out: c.out, tty: c.tty, color: c.color}
+}

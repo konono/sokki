@@ -1,6 +1,9 @@
 package config
 
-import "flag"
+import (
+	"flag"
+	"fmt"
+)
 
 // yamlBackedFlags は YAML でも指定できるフラグ名。
 // ここに挙げたフラグは「明示指定されたときだけ」 YAML より優先する。
@@ -22,6 +25,10 @@ var yamlBackedFlags = map[string]func(dst, src *Config){
 	"summary-provider":   func(dst, src *Config) { dst.SummaryProvider = src.SummaryProvider },
 	"summary-model":      func(dst, src *Config) { dst.SummaryModel = src.SummaryModel },
 	"summary-ollama-url": func(dst, src *Config) { dst.OllamaURL = src.OllamaURL },
+	"translate":          func(dst, src *Config) { dst.TranslateMode = src.TranslateMode },
+	"llm-provider":       func(dst, src *Config) { dst.SummaryProvider = src.SummaryProvider },
+	"llm-model":          func(dst, src *Config) { dst.SummaryModel = src.SummaryModel },
+	"llm-ollama-url":     func(dst, src *Config) { dst.OllamaURL = src.OllamaURL },
 }
 
 // Resolve は「明示した CLI フラグ > YAML > 既定値」の優先順位で設定を決める。
@@ -74,4 +81,15 @@ func explicitFlags(fs *flag.FlagSet) map[string]bool {
 	}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	return set
+}
+
+// ValidateLLMFlags rejects ambiguous old/new CLI spellings before capture.
+func ValidateLLMFlags(fs *flag.FlagSet) error {
+	explicit := explicitFlags(fs)
+	for _, pair := range [][2]string{{"llm-provider", "summary-provider"}, {"llm-model", "summary-model"}, {"llm-ollama-url", "summary-ollama-url"}} {
+		if explicit[pair[0]] && explicit[pair[1]] {
+			return fmt.Errorf("--%s と --%s は同時指定できません", pair[0], pair[1])
+		}
+	}
+	return nil
 }
