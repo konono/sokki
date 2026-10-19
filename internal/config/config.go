@@ -44,6 +44,10 @@ type Config struct {
 	InterimInterval time.Duration
 
 	// 推論バックエンド
+	Backend       string // whisper (既定) / qwen
+	FinalStrategy string // hybrid (既定) / whole
+	QwenPython    string // Qwen 専用の隔離 Python 実行ファイル
+	QwenModel     string // ローカルの Qwen3-ASR モデルディレクトリ
 	ServerURL     string // 指定時は起動済み whisper-server を利用する
 	ServerBin     string
 	FFmpegBin     string
@@ -106,6 +110,8 @@ func Default() Config {
 		SummaryMaxWait:  180 * time.Second,
 		SummaryMaxChars: 2000,
 		ServerBin:       "whisper-server",
+		Backend:         "whisper",
+		FinalStrategy:   "hybrid",
 		FFmpegBin:       "ffmpeg",
 		Threads:         threads,
 	}

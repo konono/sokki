@@ -42,8 +42,12 @@ type CaptureSection struct {
 
 // TranscriptionSection は認識の設定。
 type TranscriptionSection struct {
-	Language *strValue `yaml:"language"`
-	Model    *strValue `yaml:"model"`
+	Language      *strValue `yaml:"language"`
+	Model         *strValue `yaml:"model"`
+	Backend       *strValue `yaml:"backend"`
+	FinalStrategy *strValue `yaml:"final_strategy"`
+	QwenPython    *strValue `yaml:"qwen_python"`
+	QwenModel     *strValue `yaml:"qwen_model"`
 }
 
 // SummarySection は自動要約の設定。
@@ -149,6 +153,17 @@ func (f *File) validate(path string) error {
 		if err := requireNonBlank(path, "transcription.language", tr.Language); err != nil {
 			return err
 		}
+		for _, entry := range []struct {
+			key   string
+			value *strValue
+		}{
+			{"backend", tr.Backend}, {"final_strategy", tr.FinalStrategy},
+			{"qwen_python", tr.QwenPython}, {"qwen_model", tr.QwenModel},
+		} {
+			if err := requireNonBlank(path, "transcription."+entry.key, entry.value); err != nil {
+				return err
+			}
+		}
 	}
 	if o := f.Output; o != nil {
 		if err := requireNonBlank(path, "output.directory", o.Directory); err != nil {
@@ -240,6 +255,10 @@ func (f *File) Apply(cfg *Config) {
 	}
 	if t := f.Transcription; t != nil {
 		setString(t.Language, &cfg.Language)
+		setString(t.Backend, &cfg.Backend)
+		setString(t.FinalStrategy, &cfg.FinalStrategy)
+		setString(t.QwenPython, &cfg.QwenPython)
+		setString(t.QwenModel, &cfg.QwenModel)
 		// model は空文字を「既定の探索順を使う」意味として許容するため、
 		// 空でないときだけ反映する。
 		setString(t.Model, &cfg.Model)
@@ -316,7 +335,7 @@ func configHint() string {
 // transcription.model だけは空 (既定の探索順) を許可するため含めない。
 var nonNullKeys = map[string][]string{
 	"capture":       {"device", "type"},
-	"transcription": {"language"},
+	"transcription": {"language", "backend", "final_strategy", "qwen_python", "qwen_model"},
 	"output":        {"directory"},
 	"summary": {"enabled", "provider", "min_new_lines",
 		"min_interval", "max_interval", "max_chars"},

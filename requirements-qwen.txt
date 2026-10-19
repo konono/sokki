@@ -1,0 +1,6 @@
+# Python 3.12, Apple Silicon. Runtime loads only local model files.
+mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git@1865f49cc9a40de9b5e4fcf55952b9812d751f1d
+mlx==0.32.4
+mlx-metal==0.32.4
+numpy==2.5.4
+huggingface-hub==1.33.0

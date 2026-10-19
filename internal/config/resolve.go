@@ -5,11 +5,15 @@ import "flag"
 // yamlBackedFlags は YAML でも指定できるフラグ名。
 // ここに挙げたフラグは「明示指定されたときだけ」 YAML より優先する。
 var yamlBackedFlags = map[string]func(dst, src *Config){
-	"device": func(dst, src *Config) { dst.Device = src.Device },
-	"model":  func(dst, src *Config) { dst.Model = src.Model },
-	"lang":   func(dst, src *Config) { dst.Language = src.Language },
-	"l":      func(dst, src *Config) { dst.Language = src.Language },
-	"out":    func(dst, src *Config) { dst.OutputDir = src.OutputDir },
+	"device":         func(dst, src *Config) { dst.Device = src.Device },
+	"model":          func(dst, src *Config) { dst.Model = src.Model },
+	"backend":        func(dst, src *Config) { dst.Backend = src.Backend },
+	"final-strategy": func(dst, src *Config) { dst.FinalStrategy = src.FinalStrategy },
+	"qwen-python":    func(dst, src *Config) { dst.QwenPython = src.QwenPython },
+	"qwen-model":     func(dst, src *Config) { dst.QwenModel = src.QwenModel },
+	"lang":           func(dst, src *Config) { dst.Language = src.Language },
+	"l":              func(dst, src *Config) { dst.Language = src.Language },
+	"out":            func(dst, src *Config) { dst.OutputDir = src.OutputDir },
 
 	// 自動要約も設定ファイルで指定できるので、
 	// 明示したフラグのときだけ上書きする。

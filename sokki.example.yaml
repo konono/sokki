@@ -32,6 +32,18 @@ capture:
   device: "Conference Output"
 
 transcription:
+  # 既定は whisper。Qwen を明示選択する場合は qwen にする。
+  backend: whisper
+
+  # hybrid: 全体と分割/C7を合流 (既定)。whole: 全体を1回だけ認識。
+  final_strategy: hybrid
+
+  # Qwen を使う場合のみ、別途作成した隔離 Python とローカル BF16 モデルを
+  # 絶対パスで指定する。起動時の自動ダウンロードは行わない。
+  # Qwen 用に切り替えるときは下の model: "" を維持する。
+  # qwen_python: "/Users/you/.venvs/sokki-qwen/bin/python"
+  # qwen_model: "/Users/you/models/Qwen3-ASR-1.7B-bf16"
+
   # 認識する言語。空欄にはできません (使わないなら行ごと削除)。
   #   ja    日本語のみ (既定・日本語会議で最も安定)
   #   en    英語のみ

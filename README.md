@@ -1,10 +1,10 @@
 # sokki — 会議音声のローカル文字起こし
 
 仮想オーディオデバイス（Loopback / BlackHole）に流れる会議音声を、この Mac 上の
-whisper.cpp で文字起こしします。結果はターミナルに逐次表示し、会議ごとにテキストファイルへ保存します。
+既定では whisper.cpp で文字起こしします。Qwen3-ASR も明示選択できます。結果はターミナルに逐次表示し、会議ごとにテキストファイルへ保存します。
 
-- 推論はローカルの **whisper.cpp** (`whisper-server`) を外部プロセスとして使用します
-- 音声認識は `127.0.0.1` の whisper-server で処理します。**既定で有効な自動要約では、確定した会議テキストが設定した AI プロバイダーへ送られます**
+- 既定の推論はローカルの **whisper.cpp** (`whisper-server`) を外部プロセスとして使用します。Qwen 選択時はローカル Python worker を使います
+- whisper の音声認識は `127.0.0.1` の whisper-server で処理します。**既定で有効な自動要約では、確定した会議テキストが設定した AI プロバイダーへ送られます**
 - 入力は設定したデバイスのみです（既定のマイクには切り替えません）。自分の声がそのデバイスに流れていれば、自分の声も文字起こしの対象になります
 - **音声ファイルは保存しません**（テキストのみ）
 - 入力デバイス・モデル・言語・保存先は **YAML 設定ファイル**で変更できます
@@ -123,7 +123,30 @@ AI から使う場合は「[AI と連携する（MCP）](#ai-と連携するmcp)
 各行の時刻は **会議開始からの経過時間** です。1 行ごとに `flush` するため、
 異常終了しても直前までの内容が残ります。
 
+## Qwen3-ASR を明示して試す
+
+既定の認識は従来どおり `whisper` + `hybrid` です。Qwen を使う場合は Apple Silicon 上で Python 3.12 の隔離環境を作り、同梱の依存定義を手動で導入します。実行中に依存やモデルをダウンロードしません。
+
+```sh
+python3.12 -m venv /absolute/path/to/qwen-venv
+/absolute/path/to/qwen-venv/bin/python -m pip install -r requirements-qwen.txt
+/absolute/path/to/qwen-venv/bin/hf download mlx-community/Qwen3-ASR-1.7B-bf16 \
+  --revision e1f6c266914abc5a46e8756e02580f834a6cf8a7 \
+  --local-dir /absolute/path/to/Qwen3-ASR-1.7B-bf16
+```
+
+モデルは BF16 のローカルディレクトリを指定してください。上のrevisionと `mlx-audio` のcommitは今回の保存音声比較で使用したものです。Qwenでは `language: ja` が必須で、初期prompt、語彙ヒント、DTWは使いません。
+
+```sh
+./bin/sokki --backend qwen --final-strategy whole --lang ja --model "" \
+  --qwen-python /absolute/path/to/qwen-venv/bin/python \
+  --qwen-model /absolute/path/to/Qwen3-ASR-1.7B-bf16
+```
+
+`--model ""` は既存YAMLのWhisper用 `transcription.model` 指定をこの実行だけ空にします。Qwen専用YAMLでは `model: ""` にしてください。`--final-strategy hybrid` も選べます。認識backendと確定処理を独立して指定でき、Qwenに合流を強制しません。起動時に選択したbackend・確定処理・モデルを表示します。従来の構成へ戻す場合は `--backend whisper --final-strategy hybrid` を指定するか、設定ファイルの `transcription.backend` / `final_strategy` をそれぞれ `whisper` / `hybrid` に戻してください。Qwen用Pythonとモデルのパスはwhisper選択時には使いません。
+
 ## 設定ファイル
+
 
 毎回フラグを指定しなくて済むよう、YAML で設定できます。
 
@@ -150,8 +173,13 @@ capture:
   type: device                 # 現在は "device" のみ
   device: "Conference Output"  # `sokki list` で確認した名前
 transcription:
+  backend: whisper              # whisper (既定) / qwen
+  final_strategy: hybrid        # hybrid (既定) / whole
   language: ja                 # ja / en / auto
   model: ""                    # 空なら既定の探索順
+  # Qwen 利用時のみ絶対パスで指定
+  # qwen_python: "/Users/you/.venvs/sokki-qwen/bin/python"
+  # qwen_model: "/Users/you/models/Qwen3-ASR-1.7B-bf16"
 output:
   directory: transcripts
 ```
@@ -375,6 +403,10 @@ transcription:
 | `--config` | `~/.config/sokki/config.yaml` | 設定ファイルのパス |
 | `--device` | `Conference Output` | 入力デバイス名 |
 | `--model` | 自動探索 | ggml モデルのパス |
+| `--backend` | `whisper` | `whisper` / `qwen` |
+| `--final-strategy` | `hybrid` | `hybrid` (全体+分割/C7) / `whole` (全体1回) |
+| `--qwen-python` | — | Qwen 用の隔離 Python 実行ファイルの絶対パス |
+| `--qwen-model` | — | ローカル Qwen3-ASR BF16 モデルディレクトリの絶対パス |
 | `--lang`, `-l` | `ja` | 認識する言語（`ja` / `en` / `auto`）|
 | `--out` | `transcripts` | 保存先ディレクトリ |
 | `--interim` | `true` | 暫定結果を表示する |
@@ -644,7 +676,8 @@ summary:
 設定した入力デバイス (Loopback / BlackHole 2ch など, 48 kHz / stereo)
   → ffmpeg (avfoundation, -ac 1 で Ch1&2 を統合, 16 kHz s16le)
   → 無音区間検出 (VAD) で発話区間を作る
-  → whisper-server (127.0.0.1, ggml-large-v3-turbo) で全体・分割の両方を認識
+  → 選択した backend (既定: whisper-server、明示指定: Qwen worker) で認識
+  → 選択した確定処理 (既定: 全体+分割/C7のhybrid、wholeは全体1回)
   → 重複・無音由来の定型句を除去 → ターミナル表示 + ファイル追記
 ```
 

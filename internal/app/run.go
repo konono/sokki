@@ -44,10 +44,15 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		return err
 	}
 
-	if err := whisper.ValidateLocalURL(cfg.ServerURL); err != nil {
+	if err := cfg.ValidateRecognition(); err != nil {
 		return fail(err)
 	}
-	modelPath, err := cfg.ResolveModel()
+	if cfg.Backend == config.BackendWhisper {
+		if err := whisper.ValidateLocalURL(cfg.ServerURL); err != nil {
+			return fail(err)
+		}
+	}
+	modelPath, err := cfg.ResolveRecognitionModel()
 	if err != nil {
 		return fail(err)
 	}
@@ -57,9 +62,11 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 	}
 
 	con.Info("入力デバイス : [%d] %s", dev.Index, dev.Name)
+	con.Info("認識 backend : %s", cfg.Backend)
+	con.Info("確定処理     : %s", cfg.FinalStrategy)
 	con.Info("モデル       : %s", modelPath)
 	con.Info("言語         : %s", cfg.Language)
-	con.Info("whisper 起動中 (モデル読み込みに時間がかかります)...")
+	con.Info("%s 起動中 (モデル読み込みに時間がかかります)...", cfg.Backend)
 
 	client, err := startBackend(ctx, cfg, modelPath)
 	if err != nil {
@@ -378,7 +385,7 @@ func transcribeLoop(ctx context.Context, cfg config.Config, client transcriber,
 		if ev.Kind == vad.Interim && len(events) > 0 {
 			continue
 		}
-		handleEventWithTrace(ctx, client, writer, con, lv, ev, traceDir)
+		handleEventWithStrategy(ctx, client, writer, con, lv, ev, traceDir, cfg.FinalStrategy)
 	}
 }
 
@@ -394,6 +401,11 @@ func handleEvent(ctx context.Context, client transcriber, writer *transcript.Wri
 
 func handleEventWithTrace(ctx context.Context, client transcriber, writer *transcript.Writer,
 	con *view, lv *live, ev vad.Event, traceDir string) {
+	handleEventWithStrategy(ctx, client, writer, con, lv, ev, traceDir, config.FinalHybrid)
+}
+
+func handleEventWithStrategy(ctx context.Context, client transcriber, writer *transcript.Writer,
+	con *view, lv *live, ev vad.Event, traceDir, finalStrategy string) {
 	if ev.Kind != vad.Interim {
 		defer clearInterim(con, lv)
 	}
@@ -403,7 +415,11 @@ func handleEventWithTrace(ctx context.Context, client transcriber, writer *trans
 	startedInference := time.Now()
 	var observation finalObservation
 	if ev.Kind == vad.Final {
-		if traceDir == "" {
+		if finalStrategy == config.FinalWhole {
+			text, err = client.Transcribe(ctx, ev.Audio, config.SampleRate)
+			observation = finalObservation{Whole: text, ReconcileWhole: transcript.Clean(text),
+				RangeCount: 1, ReconcileMode: "whole", Result: text}
+		} else if traceDir == "" {
 			text, err = transcribeFinal(ctx, client, ev.Audio)
 		} else {
 			text, err = transcribeFinalObserved(ctx, client, ev.Audio, func(obs finalObservation) {
