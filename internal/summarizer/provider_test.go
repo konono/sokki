@@ -182,7 +182,9 @@ func TestExecProviderReportsFailure(t *testing.T) {
 
 // タイムアウトを守ること。
 func TestExecProviderTimeout(t *testing.T) {
-	p := &ExecProvider{Command: fakeCmd(t, "sleep 5"), Timeout: 100 * time.Millisecond}
+	// Force a separate child: some shells optimize a final `sleep` into exec,
+	// hiding the inherited stdout/stderr pipe that used to delay cancellation.
+	p := &ExecProvider{Command: fakeCmd(t, "sleep 5 & wait"), Timeout: 100 * time.Millisecond}
 	start := time.Now()
 	_, err := p.Summarize(context.Background(), Input{NewLines: []Line{{Text: "x"}}})
 	if err == nil {
@@ -193,6 +195,28 @@ func TestExecProviderTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "タイムアウト") {
 		t.Errorf("理由が不明: %v", err)
+	}
+}
+
+func TestExecProviderBoundsInheritedPipeAfterParentExit(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "child-survived")
+	p := &ExecProvider{
+		Command: fakeCmd(t, `(sleep 1; echo alive > "`+marker+`") &
+echo '{"topic":"t","summary":"s"}'
+exit 0`),
+		Timeout: 5 * time.Second,
+	}
+	start := time.Now()
+	_, err := p.Summarize(context.Background(), Input{})
+	if err == nil {
+		t.Fatal("inherited output pipe was accepted as a complete response")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("inherited pipe delayed completion: %v", elapsed)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("descendant survived provider completion: %v", err)
 	}
 }
 

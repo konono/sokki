@@ -80,6 +80,20 @@ func homeWithBrokenConfig(t *testing.T) string {
 	return home
 }
 
+// fakeFFmpeg はデバイス一覧だけを返す。実機の ffmpeg や音声デバイスに依存しない。
+func fakeFFmpeg(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffmpeg")
+	script := `#!/bin/sh
+printf '%s\n' 'AVFoundation audio devices:' '[0] Conference Output' '[1] BlackHole 2ch' >&2
+exit 1
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestVersionBeforeConfigAndCapture(t *testing.T) {
 	bin := buildSokki(t)
 	home := homeWithBrokenConfig(t)
@@ -97,7 +111,7 @@ func TestVersionBeforeConfigAndCapture(t *testing.T) {
 
 func TestListShowsDeviceNames(t *testing.T) {
 	bin := buildSokki(t)
-	out, code := runSokki(t, bin, t.TempDir(), "list")
+	out, code := runSokki(t, bin, t.TempDir(), "list", "--ffmpeg", fakeFFmpeg(t))
 	if code != 0 {
 		t.Fatalf("exit=%d\n%s", code, out)
 	}
@@ -113,7 +127,7 @@ func TestListWorksWithBrokenConfig(t *testing.T) {
 	bin := buildSokki(t)
 	home := homeWithBrokenConfig(t)
 
-	out, code := runSokki(t, bin, home, "list")
+	out, code := runSokki(t, bin, home, "list", "--ffmpeg", fakeFFmpeg(t))
 	if code != 0 {
 		t.Fatalf("壊れた設定で list が失敗した: exit=%d\n%s", code, out)
 	}
@@ -158,9 +172,10 @@ func TestNormalRunFailsOnBrokenConfig(t *testing.T) {
 func TestListDevicesFlagStillWorks(t *testing.T) {
 	bin := buildSokki(t)
 	home := t.TempDir()
+	ffmpeg := fakeFFmpeg(t)
 
-	flagOut, flagCode := runSokki(t, bin, home, "--list-devices")
-	subOut, subCode := runSokki(t, bin, home, "list")
+	flagOut, flagCode := runSokki(t, bin, home, "--list-devices", "--ffmpeg", ffmpeg)
+	subOut, subCode := runSokki(t, bin, home, "list", "--ffmpeg", ffmpeg)
 	if flagCode != 0 || subCode != 0 {
 		t.Fatalf("exit: --list-devices=%d list=%d", flagCode, subCode)
 	}
@@ -184,7 +199,7 @@ func TestListDevicesFlagStillWorks(t *testing.T) {
 // --list-devices も壊れた設定に影響されないこと。
 func TestListDevicesFlagWorksWithBrokenConfig(t *testing.T) {
 	bin := buildSokki(t)
-	out, code := runSokki(t, bin, homeWithBrokenConfig(t), "--list-devices")
+	out, code := runSokki(t, bin, homeWithBrokenConfig(t), "--list-devices", "--ffmpeg", fakeFFmpeg(t))
 	if code != 0 {
 		t.Fatalf("壊れた設定で --list-devices が失敗した: exit=%d\n%s", code, out)
 	}
@@ -197,7 +212,7 @@ func TestListDevicesFlagWorksWithBrokenConfig(t *testing.T) {
 func TestListDoesNotRequireModel(t *testing.T) {
 	bin := buildSokki(t)
 	// モデルの既定探索先が存在しないホームで実行する。
-	out, code := runSokki(t, bin, t.TempDir(), "list")
+	out, code := runSokki(t, bin, t.TempDir(), "list", "--ffmpeg", fakeFFmpeg(t))
 	if code != 0 {
 		t.Fatalf("モデル無しで list が失敗した: exit=%d\n%s", code, out)
 	}
@@ -399,6 +414,7 @@ func TestFailedDeviceIsRecorded(t *testing.T) {
 		"--pane-role", "sokki",
 		"--session-id", id,
 		"--model", model,
+		"--ffmpeg", fakeFFmpeg(t),
 		"--device", "ZZZ_NO_SUCH_DEVICE_FOR_TEST")
 	if code == 0 {
 		t.Fatalf("デバイス不在で成功した:\n%s", out)
@@ -537,6 +553,7 @@ func TestLauncherSurfacesRealCLIFailure(t *testing.T) {
 	// launcher 側 (テストプロセス) も同じ HOME を見るようにする。
 	t.Setenv("HOME", home)
 	t.Setenv("ZELLIJ_SESSION_NAME", "itest-mux")
+	t.Setenv("ZELLIJ_PANE_ID", "9")
 	t.Setenv("TMUX", "")
 	mockPanecomRunning(t, home)
 

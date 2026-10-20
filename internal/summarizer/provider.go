@@ -9,9 +9,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/konono/sokki/internal/proc"
 )
 
 // Line は要約の材料となる確定発言。
@@ -82,13 +84,21 @@ func (p *ExecProvider) Summarize(ctx context.Context, in Input) (Output, error) 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, p.Command[0], p.Command[1:]...)
+	cmd := proc.Command(ctx, p.Command[0], p.Command[1:]...)
+	// A shell/CLI can leave a child holding stdout after its own cancellation.
+	// Cancel the dedicated process group and bound inherited-pipe draining.
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 300 * time.Millisecond
 	cmd.Stdin = strings.NewReader(BuildPrompt(in))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
