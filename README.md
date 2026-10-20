@@ -54,6 +54,33 @@ Qwen選択時はwhisper.cpp不要、Ollama要約にはQwen用Python不要です�
 以下のコマンドはそのリポジトリ直下で実行します。`./bin/sokki` は `make build` で作る
 通常のバイナリです。個別環境向けの `sokki-qwen` ランチャーは新規導入に必須ではありません。
 
+### 配布版・go install・開発ビルド
+
+公開 `main` には現時点で新機能が未反映です。**以下のReleaseと`@latest`の手順は、
+このソースが公開され、最初のReleaseが完成した後に使えます。**
+今は上記のとおり新機能を含むチェックアウトからビルドしてください。
+
+公開後にGo 1.26以上があるmacOSなら、実行ファイルだけを入れられます。
+`go install` の対象は既存の `cmd/sokki` で、リポジトリroot用のラッパーは不要です。
+
+```sh
+go install github.com/konono/sokki/cmd/sokki@latest
+sokki --version
+```
+
+実行ファイルは `GOBIN`、未設定なら `GOPATH/bin` に入ります。その場所をPATHへ加えてください。
+この方法ではREADME・Qwenの `requirements-qwen.txt`・設定見本は入りません。
+必要なら**同じ版**の[GitHub Releases](https://github.com/konono/sokki/releases)から
+Darwin `arm64` / `amd64` のアーカイブを取得してください。
+アーカイブには `sokki` が直下に入り、展開後は `./sokki --version` で確認します。
+`checksums.txt` で取得ファイルのSHA-256を照合できます。
+
+開発チェックアウトからは `make build` で `./bin/sokki` を作ります。
+以下の本文にある `./bin/sokki` はこの開発ビルドの表記です。
+`go install` 版を使う場合は `sokki`、Release展開先では `./sokki` に読み替えてください。
+どの導入方法も録音用ffmpeg・Whisperのserver/モデル、選択したQwenのPython/モデル、
+ClaudeまたはOllama、MCPで使うpanecom等を自動導入しません。
+
 <a id="audio-setup"></a>
 
 ## ⚠️ 実行前に必ず設定してください（会議音声が聞こえなくなるのを防ぐ）
@@ -1164,3 +1191,46 @@ make test-e2e     # 実機テスト（whisper-server + 実モデルを使用）
 
 `make test-e2e` は `say` で生成した日本語音声を使い、
 区間検出 → whisper.cpp → 重複抑制 → 保存 の全段を通します（音声デバイスは使いません）。
+
+## リリース管理者向け
+
+`.github/workflows/release.yml` は `main` へのPRとpushでmacOS・Go 1.26の
+`go test ./...` / `go vet ./...` を実行します。通過した `main` pushだけが
+[release-please v4](https://github.com/googleapis/release-please-action)を動かします。
+Conventional Commits（例 `feat: add ...`、`fix: correct ...`）からRelease PRを更新し、
+そのPRをマージしたpushでtagとGitHub Releaseを作ります。同じworkflowの後続jobが
+tagを直接checkoutして[GoReleaser](https://goreleaser.com/)でDarwin arm64/amd64の
+アーカイブと `checksums.txt` を添付します。別のtag-pushイベントには依存しません。
+
+初回公開前に管理者が次を確認します。
+
+1. 公開する変更と依存・設定の案内をレビューし、公開 `main` へ反映する承認を得る。
+   このREADME冒頭の「公開main未反映」も、実際の公開時点で書き換える。
+2. GitHub Actionsのworkflow権限を確認する。通常のtest jobは読取のみ、
+   release-pleaseには `contents: write` / `issues: write` / `pull-requests: write`、
+   GoReleaserには `contents: write` が必要。リポジトリ・組織の設定で許可する。
+   `RELEASE_PLEASE_TOKEN` を使わない場合は
+   **Allow GitHub Actions to create and approve pull requests** を有効にする。
+   自動PRのCIを承認操作なしで走らせたい場合は、同権限を持つGitHub App tokenまたは
+   fine-grained PATをsecret `RELEASE_PLEASE_TOKEN` に登録する。
+   PAT/App tokenにも同じリポジトリへの書込権限を与える。
+3. 初回は `.release-please-manifest.json` の `0.0.0`、
+   `initial-version: 0.1.0`、`bootstrap-sha` を起点にする。
+   起点以降の `feat:` などを含むpushでRelease PRを作り、提案版が `v0.1.0`、
+   `internal/version/version.go` とmanifestが同じ版になったことを確認してからマージする。
+   `bootstrap-sha` は初回PR生成の範囲を区切るための設定で、初回公開後は不要。
+4. `GITHUB_TOKEN` で作成したRelease PRは、PRイベントからのCI起動を当てにしない。
+   管理者がActionsの **Run workflow** でRelease PRのブランチを指定し、
+   `workflow_dispatch` のtest成功を確認してからマージする。
+   この手動実行ではrelease-please/GoReleaser jobはスキップされる。
+   PAT/App tokenで作成したPRなら通常のPR CIが起動する。
+   公開直前にもmain pushのtestが必須gateになる。
+5. Releaseの2アーカイブとchecksum、`./sokki --version`、
+   公開後の `go install github.com/konono/sokki/cmd/sokki@latest` を確認する。
+   アセット添付が途中で失敗したら、同じworkflowの失敗したGoReleaser jobを再実行する。
+   `keep-existing` でrelease-pleaseの本文を維持し、既存アセットは再アップロード時に
+   置換できる設定なので、新しいtagを手作業で作らない。
+
+release-pleaseが作るGitHub ReleaseとGoReleaserのアセット添付は同じworkflow内で連結しています。
+Release PRとCIの関係は[release-pleaseの案内](https://github.com/googleapis/release-please-action#other-actions-on-release-please-prs)、
+tokenによるイベント連鎖は[GitHub公式説明](https://docs.github.com/en/actions/concepts/security/github_token)を参照してください。

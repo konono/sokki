@@ -13,6 +13,7 @@ import (
 	"github.com/konono/sokki/internal/mcp"
 	"github.com/konono/sokki/internal/panecom"
 	"github.com/konono/sokki/internal/session"
+	"github.com/konono/sokki/internal/version"
 	"testing"
 )
 
@@ -77,6 +78,21 @@ func homeWithBrokenConfig(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return home
+}
+
+func TestVersionBeforeConfigAndCapture(t *testing.T) {
+	bin := buildSokki(t)
+	home := homeWithBrokenConfig(t)
+	for _, args := range [][]string{
+		{"version"},
+		{"--version"},
+		{"--config", filepath.Join(home, "missing.yaml"), "--version"},
+	} {
+		out, code := runSokki(t, bin, home, args...)
+		if code != 0 || out != "sokki "+version.Version+"\n" {
+			t.Errorf("args=%q exit=%d output=%q", args, code, out)
+		}
+	}
 }
 
 func TestListShowsDeviceNames(t *testing.T) {

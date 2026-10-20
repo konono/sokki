@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "go",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "bootstrap-sha": "ca0bb8bcd9f1c7ba134d9408ada56848621f8251",
+  "packages": {
+    ".": {
+      "initial-version": "0.1.0",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "internal/version/version.go"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,41 @@
+version: 2
+
+project_name: sokki
+
+release:
+  mode: keep-existing
+  replace_existing_artifacts: true
+
+builds:
+  - id: sokki
+    main: ./cmd/sokki
+    binary: sokki
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: sokki
+    ids:
+      - sokki
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - sokki.example.yaml
+      - requirements-qwen.txt
+      - examples/config-profiles.yaml
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc

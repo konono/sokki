@@ -20,9 +20,18 @@ import (
 	"github.com/konono/sokki/internal/config"
 	"github.com/konono/sokki/internal/session"
 	"github.com/konono/sokki/internal/ui"
+	"github.com/konono/sokki/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		if len(os.Args) != 2 {
+			fmt.Fprintln(os.Stderr, "使い方: sokki version")
+			os.Exit(1)
+		}
+		fmt.Println("sokki", version.Version)
+		return
+	}
 	// `sokki list` は設定ファイル・モデルの読込より前に処理する。
 	// 設定が壊れていても、デバイス名を確認して直せるようにするため。
 	if len(os.Args) > 1 && os.Args[1] == "list" {
@@ -41,11 +50,13 @@ func main() {
 	cfg := defaults
 	var (
 		listDevices bool
+		showVersion bool
 		configPath  string
 		profileName string
 	)
 
 	fs := flag.NewFlagSet("sokki", flag.ExitOnError)
+	fs.BoolVar(&showVersion, "version", false, "バージョンを表示して終了")
 	fs.StringVar(&configPath, "config", "",
 		"設定ファイルのパス (既定: ~/.config/sokki/config.yaml があれば自動で読む)")
 	fs.StringVar(&profileName, "profile", "", "設定ファイル内の profile.NAME を選択")
@@ -96,6 +107,7 @@ func main() {
 使い方:
   sokki [options]
   sokki list                             # 入力デバイス名の一覧
+  sokki version                          # バージョン表示
   sokki profiles [--config FILE]         # 設定ファイル内のprofile一覧
   sokki mcp                              # AI (MCP) 用の stdio サーバー
 
@@ -111,6 +123,10 @@ func main() {
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
+	if showVersion {
+		fmt.Println("sokki", version.Version)
+		return
+	}
 
 	// --list-devices も設定ファイルの読込より前に処理する
 	// (`sokki list` と同じ理由。互換のため残しているフラグ)。
