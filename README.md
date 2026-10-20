@@ -46,21 +46,15 @@ Qwen選択時はwhisper.cpp不要、Ollama要約にはQwen用Python不要です�
 4. 要約または翻訳を使うならClaudeまたはOllamaの手順を済ませる。両方不要なら無効にする。
 5. [会議前チェック](#preflight)を通してから本番の会議で使う。
 
-**Qwen/Ollama要約は `1bef131` 以降、ライブ翻訳と共通LLM設定は `71acba2` 以降を含むソース向けです。**
-現時点ではローカル実験ブランチに実装済みで、公開 `main` へは未反映です。
-新規に公開リポジトリをcloneするだけでは、これらの機能はまだ入りません。
-今は新機能を含む既存チェックアウトからビルドしてください。
+Qwenによる日本語認識、Ollama要約、英語から日本語へのライブ翻訳、
+共通LLM設定と1ファイル内のprofileに対応しています。
 
 以下のコマンドはそのリポジトリ直下で実行します。`./bin/sokki` は `make build` で作る
 通常のバイナリです。個別環境向けの `sokki-qwen` ランチャーは新規導入に必須ではありません。
 
 ### 配布版・go install・開発ビルド
 
-公開 `main` には現時点で新機能が未反映です。**以下のReleaseと`@latest`の手順は、
-このソースが公開され、最初のReleaseが完成した後に使えます。**
-今は上記のとおり新機能を含むチェックアウトからビルドしてください。
-
-公開後にGo 1.26以上があるmacOSなら、実行ファイルだけを入れられます。
+Go 1.26以上があるmacOSなら、実行ファイルだけを入れられます。
 `go install` の対象は既存の `cmd/sokki` で、リポジトリroot用のラッパーは不要です。
 
 ```sh
@@ -1202,10 +1196,9 @@ Conventional Commits（例 `feat: add ...`、`fix: correct ...`）からRelease 
 tagを直接checkoutして[GoReleaser](https://goreleaser.com/)でDarwin arm64/amd64の
 アーカイブと `checksums.txt` を添付します。別のtag-pushイベントには依存しません。
 
-初回公開前に管理者が次を確認します。
+リリース時に管理者が次を確認します。
 
 1. 公開する変更と依存・設定の案内をレビューし、公開 `main` へ反映する承認を得る。
-   このREADME冒頭の「公開main未反映」も、実際の公開時点で書き換える。
 2. GitHub Actionsのworkflow権限を確認する。通常のtest jobは読取のみ、
    release-pleaseには `contents: write` / `issues: write` / `pull-requests: write`、
    GoReleaserには `contents: write` が必要。リポジトリ・組織の設定で許可する。
