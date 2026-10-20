@@ -47,13 +47,14 @@ func toolDefs() []toolDef {
 				"MCP でセッションを検出できなくても、呼び出し元のシェルでは Zellij が使える場合がある。" +
 				"その場合は panecom whoami を確認し、画面のない直接録音へ切り替えない。",
 			InputSchema: obj(map[string]any{
+				"profile": str("~/.config/sokki/profiles/NAME.yaml を選択。既存会議にattachした場合は適用しない"),
 				"output_dir": str("保存先ディレクトリ。相対パスはこの呼び出しの作業ディレクトリ基準。" +
-					"省略時は設定ファイルの output.directory、なければ transcripts"),
+					"省略時は選択したprofileまたは通常設定の output.directory、なければ transcripts"),
 				"language": str("認識する言語 (ja / en / auto)。省略時は設定に従う"),
 				"device":   str("入力デバイス名。省略時は設定に従う"),
-				"auto_summary": map[string]any{"type": "boolean", "description": "会議ボードを発言から自動更新するか (既定は有効)。" +
+				"auto_summary": map[string]any{"type": "boolean", "description": "会議ボードを発言から自動更新するか (profile指定時の省略値はprofileに従い、profileなしの省略値は有効)。" +
 					"有効にすると会議テキストが AI プロバイダーへ送られる"},
-				"summary_provider": str("自動要約に使う AI (claude / codex)。省略時は設定に従う"),
+				"summary_provider": str("自動要約に使う AI (claude / ollama)。省略時は選択profileまたは通常設定に従う"),
 			}),
 		},
 		{

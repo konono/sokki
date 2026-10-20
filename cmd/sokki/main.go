@@ -28,6 +28,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "list" {
 		os.Exit(runList(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "profiles" {
+		os.Exit(runProfiles(os.Args[2:]))
+	}
 	// `sokki mcp` は AI クライアントが起動する stdio サーバー。
 	// 音声デバイスは開かない (録音は専用 pane の別プロセスで動く)。
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
@@ -39,11 +42,13 @@ func main() {
 	var (
 		listDevices bool
 		configPath  string
+		profileName string
 	)
 
 	fs := flag.NewFlagSet("sokki", flag.ExitOnError)
 	fs.StringVar(&configPath, "config", "",
 		"設定ファイルのパス (既定: ~/.config/sokki/config.yaml があれば自動で読む)")
+	fs.StringVar(&profileName, "profile", "", "~/.config/sokki/profiles/NAME.yaml を必須ロード (通常configとは非マージ)")
 	fs.StringVar(&cfg.Device, "device", cfg.Device, "入力デバイス名 (avfoundation)")
 	fs.StringVar(&cfg.Model, "model", "", "ggml モデルのパス (既定: talknote の large-v3-turbo)")
 	fs.StringVar(&cfg.Backend, "backend", cfg.Backend, "認識 backend: whisper / qwen")
@@ -91,6 +96,7 @@ func main() {
 使い方:
   sokki [options]
   sokki list                             # 入力デバイス名の一覧
+	  sokki profiles                         # 利用可能なprofile一覧
   sokki mcp                              # AI (MCP) 用の stdio サーバー
 
 例:
@@ -113,7 +119,25 @@ func main() {
 	}
 
 	// 設定ファイルを読み、「明示した CLI フラグ > YAML > 既定値」で確定する。
-	file, err := loadConfigFile(configPath)
+	profileSet, configSet := false, false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "profile" {
+			profileSet = true
+		}
+		if f.Name == "config" {
+			configSet = true
+		}
+	})
+	var file *config.File
+	var err error
+	var profilePath string
+	if profileSet && configSet {
+		err = fmt.Errorf("--profile と --config は同時指定できません")
+	} else if profileSet {
+		file, profilePath, err = config.LoadProfile(profileName)
+	} else {
+		file, err = loadConfigFile(configPath)
+	}
 	if err != nil {
 		// AI から起動された場合は、設定エラーも会議記録に残す
 		// (記録が無いと AI が原因を取得できず待ち続ける)。
@@ -137,6 +161,9 @@ func main() {
 	defer stop()
 
 	con := ui.New()
+	if profileSet {
+		con.Info("profile      : %s (%s)", profileName, profilePath)
+	}
 	if file != nil && configPath != "" {
 		con.Info("設定ファイル : %s", configPath)
 	}
@@ -144,6 +171,27 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nエラー: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runProfiles is a read-only management command; it never loads config or audio.
+func runProfiles(args []string) int {
+	if len(args) != 0 {
+		fmt.Fprintln(os.Stderr, "使い方: sokki profiles")
+		return 1
+	}
+	profiles, dir, err := config.ListProfiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "エラー: %v\n", err)
+		return 1
+	}
+	if len(profiles) == 0 {
+		fmt.Printf("profileがありません。%s に NAME.yaml を作成してください。\n", dir)
+		return 0
+	}
+	for _, p := range profiles {
+		fmt.Printf("%s\t%s\n", p.Name, p.Path)
+	}
+	return 0
 }
 
 // recordStartupFailure は Run に入る前の失敗を会議記録に残す。

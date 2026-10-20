@@ -28,15 +28,18 @@ type Launcher interface {
 
 // LaunchOptions は start_or_attach の引数。
 type LaunchOptions struct {
-	OutputDir string
-	Language  string
-	Device    string
+	OutputDir        string
+	Profile          string
+	ProfileOutputDir string
+	Language         string
+	Device           string
 	// WorkDir は相対パスの基準 (呼び出し時の作業ディレクトリ)。
 	WorkDir string
 	// MuxSession は Zellij / tmux のセッション識別子。
 	MuxSession string
 	// AutoSummary は自動要約を有効にするか。
-	AutoSummary bool
+	AutoSummary          bool
+	AutoSummarySpecified bool
 	// SummaryProvider は自動要約に使う AI。
 	SummaryProvider string
 }
@@ -249,19 +252,43 @@ func recordPayload(r *session.Record) map[string]any {
 
 func (s *Server) startOrAttach(ctx context.Context, raw json.RawMessage) (any, error) {
 	args := struct {
-		OutputDir       string `json:"output_dir"`
-		Language        string `json:"language"`
-		Device          string `json:"device"`
-		AutoSummary     *bool  `json:"auto_summary"`
-		SummaryProvider string `json:"summary_provider"`
+		OutputDir       string  `json:"output_dir"`
+		Profile         *string `json:"profile"`
+		Language        string  `json:"language"`
+		Device          string  `json:"device"`
+		AutoSummary     *bool   `json:"auto_summary"`
+		SummaryProvider string  `json:"summary_provider"`
 	}{}
+	var fields map[string]json.RawMessage
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
 			return nil, fmt.Errorf("引数を解釈できません: %w", err)
 		}
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, fmt.Errorf("引数を解釈できません: %w", err)
+		}
+	}
+	var profileName, profileOutputDir string
+	profileAutoSummary := config.DefaultAutoSummary
+	if _, supplied := fields["profile"]; supplied {
+		if args.Profile == nil {
+			return nil, fmt.Errorf("profile名が空です")
+		}
+		profileName = *args.Profile
+		file, _, err := config.LoadProfile(profileName)
+		if err != nil {
+			return nil, err
+		}
+		profileCfg := config.Default()
+		file.Apply(&profileCfg)
+		profileOutputDir = profileCfg.OutputDir
+		profileAutoSummary = profileCfg.AutoSummary
 	}
 	// CLI と同じ既定値を使う。明示指定があればその値を優先する。
 	autoSummary := config.DefaultAutoSummary
+	if profileName != "" && args.AutoSummary == nil {
+		autoSummary = profileAutoSummary
+	}
 	if args.AutoSummary != nil {
 		autoSummary = *args.AutoSummary
 	}
@@ -284,18 +311,25 @@ func (s *Server) startOrAttach(ctx context.Context, raw json.RawMessage) (any, e
 		overlayLive(existing, out)
 		out["attached"] = true
 		out["note"] = "すでに録音中の会議に接続しました。新しいキャプチャは開始していません。"
+		if profileName != "" {
+			out["profile_requested"] = profileName
+			out["note"] = "すでに録音中の会議に接続しました。指定profileは既存会議に適用していません。"
+		}
 		return out, nil
 	}
 
 	wd, _ := os.Getwd()
 	rec, err := s.launcher.Launch(ctx, LaunchOptions{
-		OutputDir:       args.OutputDir,
-		Language:        args.Language,
-		Device:          args.Device,
-		WorkDir:         wd,
-		MuxSession:      mux,
-		AutoSummary:     autoSummary,
-		SummaryProvider: args.SummaryProvider,
+		OutputDir:            args.OutputDir,
+		Profile:              profileName,
+		ProfileOutputDir:     profileOutputDir,
+		Language:             args.Language,
+		Device:               args.Device,
+		WorkDir:              wd,
+		MuxSession:           mux,
+		AutoSummary:          autoSummary,
+		AutoSummarySpecified: args.AutoSummary != nil,
+		SummaryProvider:      args.SummaryProvider,
 	})
 	if err != nil {
 		return nil, err

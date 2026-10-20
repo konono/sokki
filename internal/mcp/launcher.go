@@ -55,6 +55,15 @@ func (l *PaneLauncher) Launch(ctx context.Context, opt LaunchOptions) (*session.
 	if l.SokkiBin == "" {
 		return nil, fmt.Errorf("sokki の実行ファイルを特定できません")
 	}
+	if opt.Profile != "" {
+		file, _, err := config.LoadProfile(opt.Profile)
+		if err != nil {
+			return nil, err
+		}
+		cfg := config.Default()
+		file.Apply(&cfg)
+		opt.ProfileOutputDir = cfg.OutputDir
+	}
 	role := l.RoleName
 
 	// 新しい会議は毎回新しい pane に表示する。panecom の register は
@@ -122,6 +131,9 @@ func (l *PaneLauncher) commandLine(id string, opt LaunchOptions) string {
 		"--session-id", shellQuote(id),
 		"--out", shellQuote(ResolveOutputDir(opt)),
 	}
+	if opt.Profile != "" {
+		parts = append(parts, "--profile", shellQuote(opt.Profile))
+	}
 	if opt.MuxSession != "" {
 		parts = append(parts, "--mux-session", shellQuote(opt.MuxSession))
 	}
@@ -133,12 +145,17 @@ func (l *PaneLauncher) commandLine(id string, opt LaunchOptions) string {
 	}
 	// 明示的に要約を無効にした場合も CLI の既定値で再有効化されないようにする。
 	if opt.AutoSummary {
-		parts = append(parts, "--auto-summary")
-		if opt.SummaryProvider != "" {
-			parts = append(parts, "--summary-provider", shellQuote(opt.SummaryProvider))
+		if opt.Profile == "" || opt.AutoSummarySpecified {
+			parts = append(parts, "--auto-summary")
 		}
 	} else {
-		parts = append(parts, "--auto-summary=false")
+		if opt.Profile == "" || opt.AutoSummarySpecified {
+			parts = append(parts, "--auto-summary=false")
+		}
+	}
+	// The provider is shared with translation, including translation-only profiles.
+	if opt.SummaryProvider != "" {
+		parts = append(parts, "--summary-provider", shellQuote(opt.SummaryProvider))
 	}
 	for _, a := range l.ExtraArgs {
 		parts = append(parts, shellQuote(a))
@@ -151,7 +168,11 @@ func (l *PaneLauncher) commandLine(id string, opt LaunchOptions) string {
 func ResolveOutputDir(opt LaunchOptions) string {
 	dir := opt.OutputDir
 	if dir == "" {
-		dir = outputDirFromConfig()
+		if opt.Profile != "" {
+			dir = opt.ProfileOutputDir
+		} else {
+			dir = outputDirFromConfig()
+		}
 	}
 	if dir == "" {
 		dir = config.Default().OutputDir

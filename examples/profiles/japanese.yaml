@@ -1,0 +1,16 @@
+# 編集して ~/.config/sokki/profiles/japanese.yaml にコピーする例。
+# Whisperモデルは既定探索先へ置くか、transcription.model に絶対パスを設定する。
+capture:
+  device: "Conference Output"
+transcription:
+  backend: whisper
+  final_strategy: hybrid
+  language: ja
+  model: ""
+summary:
+  enabled: true
+llm:
+  provider: claude
+  model: ""
+output:
+  directory: transcripts/japanese

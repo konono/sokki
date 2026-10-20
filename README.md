@@ -172,6 +172,61 @@ Superwhisperの `models/` 配下にあるCoreML形式は対象外です。
 
 ## 使い方
 
+### 名前付きprofileを選ぶ
+
+会議の用途ごとに設定を分ける場合は、編集したYAMLを
+`~/.config/sokki/profiles/NAME.yaml` に置き、`--profile NAME` で選びます。
+profileは組込presetではなく利用者が管理するファイルです。通常の
+`~/.config/sokki/config.yaml` とマージせず、選んだprofileが設定ファイル全体を置き換えます。
+`--profile` を省略した従来の起動は変わりません。
+
+```sh
+mkdir -p "$HOME/.config/sokki/profiles"
+cp examples/profiles/japanese.yaml "$HOME/.config/sokki/profiles/japanese.yaml"
+cp examples/profiles/english.yaml "$HOME/.config/sokki/profiles/english.yaml"
+cp examples/profiles/transcription-only.yaml "$HOME/.config/sokki/profiles/transcription-only.yaml"
+$EDITOR "$HOME/.config/sokki/profiles/japanese.yaml"  # device・モデル・保存先を確認
+./bin/sokki profiles                                # 名前とファイルパスを一覧。録音しない
+./bin/sokki --profile japanese
+./bin/sokki --profile english
+./bin/sokki --profile transcription-only
+```
+
+見本は[japanese](examples/profiles/japanese.yaml)（Whisper日本語＋Claude要約）、
+[english](examples/profiles/english.yaml)（Whisper英語＋Claude要約・日本語翻訳）、
+[transcription-only](examples/profiles/transcription-only.yaml)（Whisper英語の原文だけ）の3つです。
+実機の入力デバイス、Whisperモデル、保存先を確認してから使ってください。
+選んだ構成に必要なWhisper/Claude等は別途導入します。sokkiは依存・モデルを自動取得しません。
+
+`--profile` は通常の録音起動に付けます。`sokki profiles` は一覧専用で、
+モデル・音声デバイス・ネットワークを開きません。ディレクトリ未作成なら
+作成先を案内して正常終了し、読めない場合はエラーになります。
+profile名は英数字で始まる英数字・`-`・`_` のみです。空名やパス指定は使えません。
+指定したYAMLが無い場合は起動前にエラーになります。`--config` と `--profile` は
+同時指定できず、`--config` を空文字で明示しても競合です。
+優先順位は**明示CLI > 選択したprofile YAML > 既定値**です。
+例えばprofileの `summary.enabled: false` は `--auto-summary=true` で明示上書きできます。
+`--translate ""` や `--llm-model ""` の空文字resetも従来どおり使えます。
+起動時には選んだprofile名とパスを表示します。
+
+| 引数 | 使い方 |
+|---|---|
+| `--profile NAME` | profileを設定済みならこれだけで録音を始める |
+| `--device` / `--out` / `--lang` など | 選んだprofileの値を、その実行だけ一時上書きする |
+| `--pane-role` / `--session-id` / `--mux-session` | AI連携時の管理用。通常の手動録音では指定しない |
+
+MCPの `start_or_attach` でも `{"profile":"english"}` を渡せます。
+`auto_summary` を省略した場合はそのprofileの `summary.enabled` が使われ、
+明示した `auto_summary` が最優先です。`summary_provider` を省略すれば
+profileの共通LLM設定を使います。`output_dir` を省略した場合はprofileの
+`output.directory`、明示した場合は `output_dir` が優先です。
+profileが無い・名前やYAMLが不正な場合はpaneを作る前にエラーを返します。
+すでに同じセッションで録音中なら既存会議へ接続し、指定したprofileを
+稼働中の会議に適用したとは扱いません。
+新しいbinaryへ更新した後も、起動済みMCP serverは旧tool schemaのままです。
+AI側でprofile引数を使うにはMCP接続を再起動・再接続してください。
+録音processは別なのでMCP接続の更新では止まりません。手動CLIは新binaryからすぐ使えます。
+
 初回は、上のWhisperまたは下のQwenの**モデルパス付き起動例**を使います。
 入力・モデル・要約の設定を[設定ファイル](#設定ファイル)に保存した後は、次で起動できます。
 
@@ -410,8 +465,9 @@ cp sokki.example.yaml ~/.config/sokki/config.yaml
 $EDITOR ~/.config/sokki/config.yaml        # capture.device を書き換える
 ```
 
-`~/.config/sokki/config.yaml` があれば**自動で読み込みます**（無ければ従来どおり既定値で動作）。
-自動で読む場所はこの 1 つだけです。他の場所に置いた設定は `--config` で明示してください。
+profile未指定なら `~/.config/sokki/config.yaml` があれば**自動で読み込みます**
+（無ければ従来どおり既定値で動作）。自動で読む場所はこの1つだけです。
+他の場所に置いた設定は `--config` で、名前付きprofileは `--profile` で明示してください。
 
 別の場所に置いた設定を使う場合:
 
@@ -658,6 +714,7 @@ transcription:
 | オプション | 既定値 | 説明 |
 |---|---|---|
 | `--config` | `~/.config/sokki/config.yaml` | 設定ファイルのパス |
+| `--profile` | 無効 | `~/.config/sokki/profiles/NAME.yaml` を必須ロード。`--config` と同時指定不可 |
 | `--device` | `Conference Output` | 入力デバイス名 |
 | `--model` | 自動探索 | ggml モデルのパス |
 | `--backend` | `whisper` | `whisper` / `qwen` |
@@ -848,7 +905,8 @@ panecom whoami
 GUIから起動するMCPクライアントはターミナルのPATHを引き継がないことがあるので、クライアントの環境設定も確認します。
 
 **Qwenのbackend・Python・モデル、共通LLMのモデル・URL、翻訳の有効化はYAMLで設定してください。**
-`start_or_attach` にはこれら全てを渡す引数がなく、録音paneが読む設定が使われます。
+`start_or_attach` の `profile` で名前付きYAMLを選ぶか、profile省略時は通常config.yamlが使われます。
+ツールにはこれら全てを直接渡す引数はありません。
 登録先の `command` も、新機能をビルドしたsokkiの絶対パスにします。
 
 > panecom や多重化セッションが使えない場合、**音声デバイスを開かずにエラー**を返します
