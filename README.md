@@ -174,39 +174,42 @@ Superwhisperの `models/` 配下にあるCoreML形式は対象外です。
 
 ### 名前付きprofileを選ぶ
 
-会議の用途ごとに設定を分ける場合は、編集したYAMLを
-`~/.config/sokki/profiles/NAME.yaml` に置き、`--profile NAME` で選びます。
-profileは組込presetではなく利用者が管理するファイルです。通常の
-`~/.config/sokki/config.yaml` とマージせず、選んだprofileが設定ファイル全体を置き換えます。
-`--profile` を省略した従来の起動は変わりません。
+会議の用途ごとの設定は、`~/.config/sokki/config.yaml` のトップレベルに
+単数形の `profile:` マップとして書き、`--profile NAME` で選びます。
+profileは組込presetではなく利用者が編集する設定です。共通rootの設定に、
+選んだprofileで**明示したfieldだけ**を重ねます。profile未指定ならrootだけを使います。
 
 ```sh
-mkdir -p "$HOME/.config/sokki/profiles"
-cp examples/profiles/japanese.yaml "$HOME/.config/sokki/profiles/japanese.yaml"
-cp examples/profiles/english.yaml "$HOME/.config/sokki/profiles/english.yaml"
-cp examples/profiles/transcription-only.yaml "$HOME/.config/sokki/profiles/transcription-only.yaml"
-$EDITOR "$HOME/.config/sokki/profiles/japanese.yaml"  # device・モデル・保存先を確認
-./bin/sokki profiles                                # 名前とファイルパスを一覧。録音しない
+mkdir -p "$HOME/.config/sokki"
+cp examples/config-profiles.yaml "$HOME/.config/sokki/config.yaml"
+$EDITOR "$HOME/.config/sokki/config.yaml"  # device・モデル・保存先を確認
+./bin/sokki profiles                 # 同じ設定ファイルの名前とパスを一覧。録音しない
 ./bin/sokki --profile japanese
 ./bin/sokki --profile english
 ./bin/sokki --profile transcription-only
+./bin/sokki --config ./other.yaml --profile english
+./bin/sokki profiles --config ./other.yaml
 ```
 
-見本は[japanese](examples/profiles/japanese.yaml)（Whisper日本語＋Claude要約）、
-[english](examples/profiles/english.yaml)（Whisper英語＋Claude要約・日本語翻訳）、
-[transcription-only](examples/profiles/transcription-only.yaml)（Whisper英語の原文だけ）の3つです。
+見本は[config-profiles.yaml](examples/config-profiles.yaml)に、japanese
+（Whisper日本語＋Claude要約）、english（Whisper英語＋Claude要約・日本語翻訳）、
+transcription-only（英語の原文だけ）をまとめています。
 実機の入力デバイス、Whisperモデル、保存先を確認してから使ってください。
 選んだ構成に必要なWhisper/Claude等は別途導入します。sokkiは依存・モデルを自動取得しません。
 
-`--profile` は通常の録音起動に付けます。`sokki profiles` は一覧専用で、
-モデル・音声デバイス・ネットワークを開きません。ディレクトリ未作成なら
-作成先を案内して正常終了し、読めない場合はエラーになります。
+`--profile` は通常の録音起動に付けます。`sokki profiles [--config FILE]` は一覧専用で、
+モデル・音声デバイス・ネットワークを開きません。設定ファイルが無ければ
+作成先を案内して正常終了し、明示指定したファイルの欠落・読取不能・不正内容はエラーになります。
 profile名は英数字で始まる英数字・`-`・`_` のみです。空名やパス指定は使えません。
-指定したYAMLが無い場合は起動前にエラーになります。`--config` と `--profile` は
-同時指定できず、`--config` を空文字で明示しても競合です。
-優先順位は**明示CLI > 選択したprofile YAML > 既定値**です。
+指定したprofileがファイル内に無い場合は起動前にエラーになります。
+`--config FILE --profile NAME` はそのFILE内のprofileを選びます。
+優先順位は**明示CLI > 選択profileの明示field > 共通root > 既定値**です。
+同じ階層に`llm`と旧`summary.provider/model/ollama_url`があれば対応する`llm`が優先し、
+階層をまたぐ場合はprofileの指定がrootより優先します。節全体は置換しません。
 例えばprofileの `summary.enabled: false` は `--auto-summary=true` で明示上書きできます。
-`--translate ""` や `--llm-model ""` の空文字resetも従来どおり使えます。
+`model: ""` は継承したモデルをreset、`summary.command: []` は継承したコマンドを解除、
+`translation.mode: ""` は翻訳を無効化します。profile内の `null` は指定できません。
+未知・重複キー、不正な型・名前、profileの入れ子は読み込み時にエラーです。
 起動時には選んだprofile名とパスを表示します。
 
 | 引数 | 使い方 |
@@ -216,10 +219,11 @@ profile名は英数字で始まる英数字・`-`・`_` のみです。空名や
 | `--pane-role` / `--session-id` / `--mux-session` | AI連携時の管理用。通常の手動録音では指定しない |
 
 MCPの `start_or_attach` でも `{"profile":"english"}` を渡せます。
-`auto_summary` を省略した場合はそのprofileの `summary.enabled` が使われ、
+`auto_summary` を省略した場合、profile指定時はroot/profile適用後の
+`summary.enabled`、profileなしでは従来どおり有効が既定です。
 明示した `auto_summary` が最優先です。`summary_provider` を省略すれば
-profileの共通LLM設定を使います。`output_dir` を省略した場合はprofileの
-`output.directory`、明示した場合は `output_dir` が優先です。
+共通rootとprofileのLLM設定を使います。`output_dir` を省略した場合は
+root/profile適用後の `output.directory`、明示した場合は `output_dir` が優先です。
 profileが無い・名前やYAMLが不正な場合はpaneを作る前にエラーを返します。
 すでに同じセッションで録音中なら既存会議へ接続し、指定したprofileを
 稼働中の会議に適用したとは扱いません。
@@ -446,7 +450,7 @@ Whisperを使う場合は[Whisperの起動例](#setup-whisper)の `--auto-summar
 | 変更 | 一緒に確認する項目 |
 |---|---|
 | 新しい機能を使う | ソース更新後に `make build`。PATH上の古い `sokki` ではなく今回の `./bin/sokki` を使う |
-| Whisper → Qwen | `backend`、`qwen_python`、`qwen_model`、`language: ja` を設定し、Whisper用 `model` を空にし、YAMLの `translation.mode` 行（または `translation` 節）を削除する。CLI切替では `--translate ""` を指定する |
+| Whisper → Qwen | `backend`、`qwen_python`、`qwen_model`、`language: ja` を設定し、Whisper用 `model` を空にする。翻訳は選択profileの `translation.mode: ""` でrootからの継承も含めて無効化する（profileなしならrootに設定）。CLI切替では `--translate ""` を指定する |
 | Qwen → Whisper | `backend: whisper`、GGML `model`、`final_strategy`。Qwen用パスは使われない |
 | Claude → Ollama | 共通設定の `llm.provider: ollama`・取得済みモデルの `llm.model`・`llm.ollama_url` を設定し、`summary.command` を外す |
 | Ollama → Claude | 共通設定の `llm.provider: claude` **と `llm.model: ""` の両方**を戻す |
@@ -465,9 +469,10 @@ cp sokki.example.yaml ~/.config/sokki/config.yaml
 $EDITOR ~/.config/sokki/config.yaml        # capture.device を書き換える
 ```
 
-profile未指定なら `~/.config/sokki/config.yaml` があれば**自動で読み込みます**
+profile未指定なら `~/.config/sokki/config.yaml` の共通rootを**自動で読み込みます**
 （無ければ従来どおり既定値で動作）。自動で読む場所はこの1つだけです。
-他の場所に置いた設定は `--config` で、名前付きprofileは `--profile` で明示してください。
+他の場所に置いた設定は `--config` で、同じファイル内の名前付きprofileは
+`--profile` で明示してください。両方同時にも指定できます。
 
 別の場所に置いた設定を使う場合:
 
@@ -714,7 +719,7 @@ transcription:
 | オプション | 既定値 | 説明 |
 |---|---|---|
 | `--config` | `~/.config/sokki/config.yaml` | 設定ファイルのパス |
-| `--profile` | 無効 | `~/.config/sokki/profiles/NAME.yaml` を必須ロード。`--config` と同時指定不可 |
+| `--profile` | 無効 | 読み込む設定ファイルのトップレベル `profile.NAME` を必須選択。`--config FILE` と併用可 |
 | `--device` | `Conference Output` | 入力デバイス名 |
 | `--model` | 自動探索 | ggml モデルのパス |
 | `--backend` | `whisper` | `whisper` / `qwen` |
@@ -816,7 +821,7 @@ ollama list
 
 両例とも既存設定に従って自動要約も動き、同じLLMを使います。翻訳だけなら `--auto-summary=false` を追加します。
 
-設定ファイルなら `transcription.backend: whisper`、`transcription.language: en` と、`translation.mode: en-ja`、`llm.provider: ollama`、`llm.model: gemma4:e4b` を指定します。優先順位は明示CLI > YAML > 既定値です。既定の翻訳は無効で、無効時には翻訳用 Ollama へ一切アクセスしません。戻す場合は `--translate ""`、または YAML の `translation` 節を削除します。要約と翻訳のprovider/modelは共通です。Ollama指定時は有効な要約も同じモデルを使います。翻訳だけを止めても共通設定は残ります。既存の `--summary-provider/model/ollama-url` と `summary.provider/model/ollama_url` は共通設定の別名として維持します。CLIの新旧同時指定は同じ項目ごとにエラーです。YAMLは `llm.*` が対応する `summary.*` より優先し、`llm.model: ""` は旧モデル値を明示的に消します。`summary.command` は翻訳有効時には使えません。
+設定ファイルなら `transcription.backend: whisper`、`transcription.language: en` と、`translation.mode: en-ja`、`llm.provider: ollama`、`llm.model: gemma4:e4b` を指定します。優先順位は明示CLI > 選択profile > 共通root > 既定値です。既定の翻訳は無効で、無効時には翻訳用 Ollama へ一切アクセスしません。戻す場合は `--translate ""`、または選択profileの `translation.mode: ""` でrootからの継承も含めて無効化します（profileなしならrootに設定）。要約と翻訳のprovider/modelは共通です。Ollama指定時は有効な要約も同じモデルを使います。翻訳だけを止めても共通設定は残ります。既存の `--summary-provider/model/ollama-url` と `summary.provider/model/ollama_url` は共通設定の別名として維持します。CLIの新旧同時指定は同じ項目ごとにエラーです。同じ階層では `llm.*` が対応する `summary.*` より優先し、`llm.model: ""` は旧モデル値を明示的に消します。`summary.command` は翻訳有効時には使えません。
 
 原文は従来どおり `<会議>.txt` と IPC に保存されます。翻訳on時は日本語を主表示し、`EN:` に確定原文を併記します。別の `<会議>.ja.txt` に現在の訳と状態、`<会議>.translation.jsonl` にunit/versionの更新履歴を残します。確定原文1行で訳を開始し、次の確定行が最初の行の受領から15秒以内なら2行をまとめて訳し直します。2行目がなければ15秒または終了時にそのunitを閉じます。15秒は原文をまとめる期限で、訳が完成する期限ではありません。先行2原文は文脈だけに使い、訳す対象には含めません。
 
@@ -905,7 +910,8 @@ panecom whoami
 GUIから起動するMCPクライアントはターミナルのPATHを引き継がないことがあるので、クライアントの環境設定も確認します。
 
 **Qwenのbackend・Python・モデル、共通LLMのモデル・URL、翻訳の有効化はYAMLで設定してください。**
-`start_or_attach` の `profile` で名前付きYAMLを選ぶか、profile省略時は通常config.yamlが使われます。
+`start_or_attach` の `profile` で通常config.yaml内の名前を選べます。
+省略時は同ファイルの共通rootだけを使います。
 ツールにはこれら全てを直接渡す引数はありません。
 登録先の `command` も、新機能をビルドしたsokkiの絶対パスにします。
 

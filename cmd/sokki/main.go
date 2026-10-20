@@ -48,7 +48,7 @@ func main() {
 	fs := flag.NewFlagSet("sokki", flag.ExitOnError)
 	fs.StringVar(&configPath, "config", "",
 		"設定ファイルのパス (既定: ~/.config/sokki/config.yaml があれば自動で読む)")
-	fs.StringVar(&profileName, "profile", "", "~/.config/sokki/profiles/NAME.yaml を必須ロード (通常configとは非マージ)")
+	fs.StringVar(&profileName, "profile", "", "設定ファイル内の profile.NAME を選択")
 	fs.StringVar(&cfg.Device, "device", cfg.Device, "入力デバイス名 (avfoundation)")
 	fs.StringVar(&cfg.Model, "model", "", "ggml モデルのパス (既定: talknote の large-v3-turbo)")
 	fs.StringVar(&cfg.Backend, "backend", cfg.Backend, "認識 backend: whisper / qwen")
@@ -96,7 +96,7 @@ func main() {
 使い方:
   sokki [options]
   sokki list                             # 入力デバイス名の一覧
-	  sokki profiles                         # 利用可能なprofile一覧
+  sokki profiles [--config FILE]         # 設定ファイル内のprofile一覧
   sokki mcp                              # AI (MCP) 用の stdio サーバー
 
 例:
@@ -130,13 +130,18 @@ func main() {
 	})
 	var file *config.File
 	var err error
-	var profilePath string
-	if profileSet && configSet {
-		err = fmt.Errorf("--profile と --config は同時指定できません")
-	} else if profileSet {
-		file, profilePath, err = config.LoadProfile(profileName)
+	if configSet && configPath == "" && profileSet {
+		err = fmt.Errorf("--profile 指定時の --config のパスが空です")
 	} else {
 		file, err = loadConfigFile(configPath)
+	}
+	profilePath := configPath
+	if profilePath == "" {
+		profilePath, _ = config.DefaultConfigPath()
+	}
+	var selected *config.File
+	if err == nil && profileSet {
+		selected, err = file.SelectProfile(profileName, profilePath)
 	}
 	if err != nil {
 		// AI から起動された場合は、設定エラーも会議記録に残す
@@ -150,7 +155,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "エラー: %v\n", err)
 		os.Exit(1)
 	}
-	cfg = config.Resolve(defaults, cfg, fs, file)
+	cfg = config.ResolveSelected(defaults, cfg, fs, file, selected)
 	// pane role か会議 ID が指定されていれば AI 連携を有効にする。
 	cfg.EnableAI = cfg.PaneRole != "" || cfg.SessionID != ""
 	if cfg.EnableAI && cfg.MuxSession == "" {
@@ -173,19 +178,40 @@ func main() {
 	}
 }
 
-// runProfiles is a read-only management command; it never loads config or audio.
+// runProfiles is a read-only management command; it never loads a model or audio.
 func runProfiles(args []string) int {
-	if len(args) != 0 {
-		fmt.Fprintln(os.Stderr, "使い方: sokki profiles")
+	fs := flag.NewFlagSet("sokki profiles", flag.ContinueOnError)
+	var path string
+	fs.StringVar(&path, "config", "", "一覧に使う設定ファイル")
+	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
+		fmt.Fprintln(os.Stderr, "使い方: sokki profiles [--config FILE]")
 		return 1
 	}
-	profiles, dir, err := config.ListProfiles()
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			explicit = true
+		}
+	})
+	if explicit && path == "" {
+		fmt.Fprintln(os.Stderr, "エラー: --config のパスが空です")
+		return 1
+	}
+	if !explicit {
+		var err error
+		path, err = config.DefaultConfigPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "エラー: %v\n", err)
+			return 1
+		}
+	}
+	profiles, err := config.ListProfiles(path, explicit)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "エラー: %v\n", err)
 		return 1
 	}
 	if len(profiles) == 0 {
-		fmt.Printf("profileがありません。%s に NAME.yaml を作成してください。\n", dir)
+		fmt.Printf("profileがありません。%s のトップレベルに profile.NAME を作成してください。\n", path)
 		return 0
 	}
 	for _, p := range profiles {

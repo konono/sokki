@@ -10,14 +10,16 @@
 # 任意の場所に置いた設定を使う場合:
 #   ./bin/sokki --config /path/to/config.yaml
 #
-# 優先順位: 明示した CLI フラグ > この設定ファイル > 既定値
+# 優先順位: 明示CLI > 選択profileの明示field > 共通root > 既定値
+#   ./bin/sokki --profile english
+#   ./bin/sokki --config /path/to/config.yaml --profile english
 #
 # 次はすべてエラーになります (設定ミスを黙って無視しないため):
 #   - 未知のキー / 重複したキー / 値の型の誤り
 #   - 空欄 (例: device: "" や device:)  ← 既定値へは戻しません
 #   - 複数の YAML 文書 (--- 区切り)
 # 使わない項目は、空欄にするのではなく行ごと削除してください。
-# (transcription.model だけは空欄 "" を「既定の探索順」として許可します)
+# (model: "" はreset、translation.mode: "" は無効化に使えます)
 
 capture:
   # 取り込み方式。現在は "device" (macOS の音声入力デバイス) のみ。
@@ -113,3 +115,28 @@ output:
   # 文字起こしの保存先ディレクトリ。
   # この下に YYYY-MM-DD_HHMMSS.txt が会議ごとに作られます。
   directory: transcripts
+
+# 用途別の差分はトップレベルの単数 profile: にまとめる。
+# 書いていないfieldは共通rootを継承する。profileの入れ子は不可。
+# profileを選ばず起動した場合は上の共通rootのみを使う。
+profile:
+  japanese:
+    transcription:
+      language: ja
+    translation:
+      mode: ""
+  english:
+    transcription:
+      backend: whisper
+      language: en
+      model: ""
+    translation:
+      mode: en-ja
+    summary:
+      enabled: true
+  transcription-only:
+    summary:
+      enabled: false
+      command: []
+    translation:
+      mode: ""

@@ -56,12 +56,18 @@ func (l *PaneLauncher) Launch(ctx context.Context, opt LaunchOptions) (*session.
 		return nil, fmt.Errorf("sokki の実行ファイルを特定できません")
 	}
 	if opt.Profile != "" {
-		file, _, err := config.LoadProfile(opt.Profile)
+		path, err := config.DefaultConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		file, err := config.Load(path, false)
 		if err != nil {
 			return nil, err
 		}
 		cfg := config.Default()
-		file.Apply(&cfg)
+		if err := file.ApplySelected(&cfg, opt.Profile, path); err != nil {
+			return nil, err
+		}
 		opt.ProfileOutputDir = cfg.OutputDir
 	}
 	role := l.RoleName

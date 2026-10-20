@@ -28,6 +28,7 @@ var supportedCaptureTypes = []string{CaptureTypeDevice}
 // 「指定されたか」と「空文字を指定したか」を区別するため、
 // 各フィールドはポインタにしている。
 type File struct {
+	Profile       map[string]*File      `yaml:"profile"`
 	Capture       *CaptureSection       `yaml:"capture"`
 	Transcription *TranscriptionSection `yaml:"transcription"`
 	Output        *OutputSection        `yaml:"output"`
@@ -149,6 +150,20 @@ func Load(path string, explicit bool) (*File, error) {
 	if err := file.validate(path); err != nil {
 		return nil, err
 	}
+	for name, selected := range file.Profile {
+		if !validProfileName(name) {
+			return nil, invalidProfileName(name)
+		}
+		if selected == nil {
+			return nil, fmt.Errorf("profile.%s が空です (%s): 値を指定してください", name, path)
+		}
+		if selected.Profile != nil {
+			return nil, fmt.Errorf("profile.%s.profile は指定できません (%s): profile の入れ子は不可です", name, path)
+		}
+		if err := selected.validate(path + " [profile." + name + "]"); err != nil {
+			return nil, err
+		}
+	}
 	return &file, nil
 }
 
@@ -213,12 +228,7 @@ func (f *File) validate(path string) error {
 			}
 		}
 	}
-	if tr := f.Translation; tr != nil {
-		if err := requireNonBlank(path, "translation.mode", tr.Mode); err != nil {
-			return err
-		}
-
-	}
+	// translation.mode: "" explicitly disables an inherited translation.
 	if llm := f.LLM; llm != nil {
 		if err := requireNonBlank(path, "llm.provider", llm.Provider); err != nil {
 			return err
@@ -288,8 +298,7 @@ func (f *File) Apply(cfg *Config) {
 		setString(t.FinalStrategy, &cfg.FinalStrategy)
 		setString(t.QwenPython, &cfg.QwenPython)
 		setString(t.QwenModel, &cfg.QwenModel)
-		// model は空文字を「既定の探索順を使う」意味として許容するため、
-		// 空でないときだけ反映する。
+		// model: "" は継承した値を消し、既定の探索順を使う。
 		setString(t.Model, &cfg.Model)
 	}
 	if o := f.Output; o != nil {
@@ -302,7 +311,7 @@ func (f *File) Apply(cfg *Config) {
 		setString(sm.Provider, &cfg.SummaryProvider)
 		setString(sm.Model, &cfg.SummaryModel)
 		setString(sm.OllamaURL, &cfg.OllamaURL)
-		if len(sm.Command) > 0 {
+		if sm.Command != nil {
 			cmd := make([]string, 0, len(sm.Command))
 			for i := range sm.Command {
 				cmd = append(cmd, strings.TrimSpace(sm.Command[i].Value))
@@ -342,8 +351,8 @@ func setDuration(src *strValue, dst *time.Duration) {
 }
 
 // setString は指定された値を反映する。
-// 空欄は validate で弾いているため、ここに来るのは有効な値だけ。
-// (model の "" は「既定の探索順を使う」意味で、そのまま反映してよい)
+// 通常の空欄は validate で弾く。model/translation.mode の ""
+// は明示的なresetとしてそのまま反映する。
 func setString(src *strValue, dst *string) {
 	if v, ok := src.get(); ok {
 		*dst = strings.TrimSpace(v)
@@ -398,22 +407,90 @@ func rejectExplicitNulls(path string, raw []byte) error {
 	if root.Kind != yaml.MappingNode {
 		return nil
 	}
+	if err := rejectSectionNulls(path, root, ""); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "profile" {
+			continue
+		}
+		profiles := resolveAlias(root.Content[i+1])
+		if profiles == nil || profiles.Tag == "!!null" {
+			return blankValueError(path, "profile")
+		}
+		if profiles.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(profiles.Content); j += 2 {
+			nameNode := profiles.Content[j]
+			if nameNode.Kind != yaml.ScalarNode || nameNode.Tag != "!!str" {
+				return fmt.Errorf("profile名は文字列で指定してください (%s, line %d)", path, nameNode.Line)
+			}
+			name := nameNode.Value
+			body := resolveAlias(profiles.Content[j+1])
+			if body == nil || body.Tag == "!!null" {
+				return blankValueError(path, "profile."+name)
+			}
+			if body.Kind != yaml.MappingNode {
+				continue
+			}
+			for k := 0; k+1 < len(body.Content); k += 2 {
+				if body.Content[k].Value == "profile" {
+					return fmt.Errorf("profile.%s.profile は指定できません (%s): profile の入れ子は不可です", name, path)
+				}
+			}
+			if err := rejectSectionNulls(path, body, "profile."+name+"."); err != nil {
+				return err
+			}
+			if err := rejectNestedNulls(path, body, "profile."+name, 0); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func rejectNestedNulls(path string, n *yaml.Node, key string, depth int) error {
+	if depth > 100 {
+		return fmt.Errorf("YAML alias が深すぎます (%s)", path)
+	}
+	n = resolveAlias(n)
+	if n == nil || n.Tag == "!!null" {
+		return fmt.Errorf("%s に null は指定できません (%s): 空文字によるreset以外はキーを削除してください", key, path)
+	}
+	switch n.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if err := rejectNestedNulls(path, n.Content[i+1], key+"."+n.Content[i].Value, depth+1); err != nil {
+				return err
+			}
+		}
+	case yaml.SequenceNode:
+		for i, child := range n.Content {
+			if err := rejectNestedNulls(path, child, fmt.Sprintf("%s[%d]", key, i), depth+1); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func rejectSectionNulls(path string, root *yaml.Node, prefix string) error {
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		section := root.Content[i].Value
 		keys, ok := nonNullKeys[section]
 		if !ok {
 			continue
 		}
-		body := root.Content[i+1]
-		if body.Kind != yaml.MappingNode {
+		body := resolveAlias(root.Content[i+1])
+		if body == nil || body.Kind != yaml.MappingNode {
 			continue
 		}
 		for j := 0; j+1 < len(body.Content); j += 2 {
 			key, value := body.Content[j].Value, resolveAlias(body.Content[j+1])
-			if value == nil || value.Tag != "!!null" || !contains(keys, key) {
-				continue
+			if (value == nil || value.Tag == "!!null") && contains(keys, key) {
+				return blankValueError(path, prefix+section+"."+key)
 			}
-			return blankValueError(path, section+"."+key)
 		}
 	}
 	return nil

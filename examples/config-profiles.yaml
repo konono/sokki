@@ -1,0 +1,44 @@
+# ~/.config/sokki/config.yaml にコピーして、device・モデル・保存先を編集する例。
+# profileはこの1ファイル内の差分であり、個別YAMLを探さない。
+# Whisper/Claudeは別途導入・認証する。自動取得は行わない。
+capture:
+  device: "Conference Output"
+transcription:
+  backend: whisper
+  final_strategy: hybrid
+  language: ja
+  model: ""
+summary:
+  enabled: true
+  command: []
+llm:
+  provider: claude
+  model: ""
+output:
+  directory: transcripts
+
+profile:
+  japanese:
+    transcription:
+      language: ja
+    translation:
+      mode: ""
+    output:
+      directory: transcripts/japanese
+  english:
+    transcription:
+      language: en
+    translation:
+      mode: en-ja
+    output:
+      directory: transcripts/english
+  transcription-only:
+    transcription:
+      language: en
+    summary:
+      enabled: false
+      command: []
+    translation:
+      mode: ""
+    output:
+      directory: transcripts/transcription-only

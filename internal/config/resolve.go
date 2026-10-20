@@ -38,11 +38,22 @@ var yamlBackedFlags = map[string]func(dst, src *Config){
 // fs     : 解析済みの FlagSet (どのフラグが明示されたかの判定に使う)
 // file   : 読み込んだ設定ファイル (nil 可)
 func Resolve(base, parsed Config, fs *flag.FlagSet, file *File) Config {
+	return resolve(base, parsed, fs, file, nil)
+}
+
+// ResolveSelected applies the common root, one named profile, then explicit CLI.
+// Selection must be validated with SelectProfile before calling this function.
+func ResolveSelected(base, parsed Config, fs *flag.FlagSet, file, selected *File) Config {
+	return resolve(base, parsed, fs, file, selected)
+}
+
+func resolve(base, parsed Config, fs *flag.FlagSet, file, selected *File) Config {
 	// 1. 既定値から始める。
 	out := base
 
 	// 2. YAML を重ねる。
 	file.Apply(&out)
+	selected.Apply(&out)
 
 	// 3. 明示された CLI フラグで上書きする。
 	explicit := explicitFlags(fs)

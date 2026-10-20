@@ -275,12 +275,21 @@ func (s *Server) startOrAttach(ctx context.Context, raw json.RawMessage) (any, e
 			return nil, fmt.Errorf("profile名が空です")
 		}
 		profileName = *args.Profile
-		file, _, err := config.LoadProfile(profileName)
+		if profileName == "" {
+			return nil, fmt.Errorf("profile名が空です")
+		}
+		path, err := config.DefaultConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		file, err := config.Load(path, false)
 		if err != nil {
 			return nil, err
 		}
 		profileCfg := config.Default()
-		file.Apply(&profileCfg)
+		if err := file.ApplySelected(&profileCfg, profileName, path); err != nil {
+			return nil, err
+		}
 		profileOutputDir = profileCfg.OutputDir
 		profileAutoSummary = profileCfg.AutoSummary
 	}

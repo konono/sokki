@@ -2,12 +2,10 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	"sort"
 )
 
-// Profile is a user-owned YAML configuration, selected explicitly by name.
+// Profile is a named section of one user-owned configuration file.
 type Profile struct {
 	Name string
 	Path string
@@ -30,64 +28,47 @@ func validProfileName(name string) bool {
 	return true
 }
 
-func profileDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("ホームディレクトリを特定できません: %w", err)
-	}
-	return filepath.Join(home, ".config", "sokki", "profiles"), nil
+func invalidProfileName(name string) error {
+	return fmt.Errorf("profile名 %q が不正です: 英数字で始め、英数字・ハイフン・アンダースコアのみを使ってください", name)
 }
 
-// ProfilePath rejects separators and traversal before constructing a path.
-func ProfilePath(name string) (string, error) {
+// SelectProfile validates an explicit name and returns the selected section.
+// A missing section is an error before capture or a pane is started.
+func (f *File) SelectProfile(name, path string) (*File, error) {
 	if !validProfileName(name) {
-		return "", fmt.Errorf("profile名 %q が不正です: 英数字で始め、英数字・ハイフン・アンダースコアのみを使ってください", name)
+		return nil, invalidProfileName(name)
 	}
-	dir, err := profileDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, name+".yaml"), nil
-}
-
-// LoadProfile requires the named YAML. It never merges config.yaml.
-func LoadProfile(name string) (*File, string, error) {
-	path, err := ProfilePath(name)
-	if err != nil {
-		return nil, "", err
-	}
-	file, err := Load(path, false)
-	if err != nil {
-		return nil, path, err
-	}
-	if file == nil {
-		return nil, path, fmt.Errorf("profile %q が見つかりません: %s\n対処: sokki profiles で一覧を確認し、%s.yaml を作成してください", name, path, name)
-	}
-	return file, path, nil
-}
-
-// ListProfiles lists valid YAML names without opening a model or audio device.
-func ListProfiles() ([]Profile, string, error) {
-	dir, err := profileDir()
-	if err != nil {
-		return nil, "", err
-	}
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, dir, nil
-	}
-	if err != nil {
-		return nil, dir, fmt.Errorf("profileディレクトリを読めません (%s): %w", dir, err)
-	}
-	profiles := make([]Profile, 0)
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-			continue
-		}
-		name := strings.TrimSuffix(entry.Name(), ".yaml")
-		if validProfileName(name) {
-			profiles = append(profiles, Profile{Name: name, Path: filepath.Join(dir, entry.Name())})
+	if f != nil {
+		if selected, ok := f.Profile[name]; ok && selected != nil {
+			return selected, nil
 		}
 	}
-	return profiles, dir, nil
+	return nil, fmt.Errorf("profile %q が見つかりません: %s\n対処: sokki profiles で一覧を確認し、設定ファイルの profile.%s を作成してください", name, path, name)
+}
+
+// ApplySelected overlays root and then the selected profile, field by field.
+// Within each layer, canonical llm fields override legacy summary aliases.
+func (f *File) ApplySelected(cfg *Config, name, path string) error {
+	selected, err := f.SelectProfile(name, path)
+	if err != nil {
+		return err
+	}
+	f.Apply(cfg)
+	selected.Apply(cfg)
+	return nil
+}
+
+// ListProfiles reads and validates one configuration file without loading audio
+// or a model. Missing default config is represented by an empty list.
+func ListProfiles(path string, explicit bool) ([]Profile, error) {
+	f, err := Load(path, explicit)
+	if err != nil || f == nil {
+		return nil, err
+	}
+	profiles := make([]Profile, 0, len(f.Profile))
+	for name := range f.Profile {
+		profiles = append(profiles, Profile{Name: name, Path: path})
+	}
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
+	return profiles, nil
 }
