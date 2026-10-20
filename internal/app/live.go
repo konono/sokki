@@ -385,20 +385,21 @@ func (v *view) translationNow(u translation.Unit) {
 	}
 	v.translationShown[u.ID] = u.Seq
 	var b strings.Builder
-	if v.split != nil {
-		fmt.Fprintf(&b, "[翻訳 unit=%d v%d source=%v %s]", u.ID, u.Version, u.SourceIndices, u.State)
-	} else {
+	// The TTY already keeps each translation in a stable slot. Internal
+	// identifiers and lifecycle details belong in the saved event log.
+	if v.split == nil {
 		fmt.Fprintf(&b, "[translation unit=%d version=%d sources=%v state=%s]", u.ID, u.Version, u.SourceIndices, u.State)
-	}
-	if u.Closed {
-		fmt.Fprintf(&b, " closed=%s", u.CloseReason)
+		if u.Closed {
+			fmt.Fprintf(&b, " closed=%s", u.CloseReason)
+		}
+		b.WriteByte('\n')
 	}
 	if u.Japanese != "" {
-		fmt.Fprintf(&b, "\nJA: %s", safeTranslationDisplay(u.Japanese))
+		fmt.Fprintf(&b, "JA: %s", safeTranslationDisplay(u.Japanese))
 	} else if u.Error != "" {
-		fmt.Fprintf(&b, "\nJA: （未訳: %s）", safeTranslationDisplay(u.Error))
+		fmt.Fprintf(&b, "JA: （未訳: %s）", safeTranslationDisplay(u.Error))
 	} else {
-		b.WriteString("\nJA: （待機中）")
+		b.WriteString("JA: （翻訳中…）")
 	}
 	for _, source := range u.Source {
 		fmt.Fprintf(&b, "\nEN: %s", safeTranslationDisplay(source))
