@@ -2,4 +2,4 @@
 package version
 
 // Version is updated in release PRs by release-please.
-const Version = "0.1.0" // x-release-please-version
+const Version = "0.2.0" // x-release-please-version
