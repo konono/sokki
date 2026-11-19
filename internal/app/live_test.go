@@ -406,7 +406,7 @@ func TestLiveServesSummarizerSource(t *testing.T) {
 	}
 
 	// 公開すると反映位置と版が進むこと。
-	if err := lv.PublishSummary("話題", "・要点", 2, snap.Version); err != nil {
+	if err := lv.PublishSummary("", "話題", "・要点", 2, snap.Version); err != nil {
 		t.Fatal(err)
 	}
 	after := lv.SummarySnapshot()
@@ -434,7 +434,7 @@ func TestLivePublishSummaryRejectsStaleVersion(t *testing.T) {
 	// 手動公開が先に入った状況。
 	lv.Handle(ipc.Request{Op: ipc.OpPublish, Board: &board.Board{Topic: "手動"}})
 
-	err := lv.PublishSummary("自動", "・自動の要約", 1, 0) // 古い版 0 を基準にする
+	err := lv.PublishSummary("", "自動", "・自動の要約", 1, 0) // 古い版 0 を基準にする
 	if !errors.Is(err, summarizer.ErrVersionConflict) {
 		t.Fatalf("競合として扱われない: %v", err)
 	}

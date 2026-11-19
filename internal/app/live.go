@@ -76,6 +76,29 @@ func (l *live) markFinished(err error) {
 	}
 }
 
+// renameByTitle は会議ボードのタイトルを保存ファイル名に付ける。
+//
+// 録音・最終要約・翻訳の書き出しが全て終わってから呼ぶ。
+// タイトルが無ければ何もしない。新しい文字起こしパスを返す。
+func (l *live) renameByTitle() (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if beforeRenameHook != nil {
+		beforeRenameHook()
+	}
+	path, err := l.boards.Relocate(func(cur board.Board) (string, error) {
+		if cur.Title == "" {
+			return l.transcriptPath, nil
+		}
+		return renameWithTitle(l.transcriptPath, cur.Title)
+	})
+	l.transcriptPath = path
+	return path, err
+}
+
+// beforeRenameHook はリネーム直前に呼ばれるテスト用フック (本番では nil)。
+var beforeRenameHook func()
+
 // setState は状態を更新する。
 func (l *live) setState(s session.State) {
 	l.mu.Lock()
@@ -290,6 +313,7 @@ func (l *live) SummarySnapshot() summarizer.Snapshot {
 	return summarizer.Snapshot{
 		Lines:          lines,
 		Total:          len(l.lines),
+		Title:          cur.Title,
 		Topic:          cur.Topic,
 		Summary:        cur.Summary,
 		AppliedThrough: from,
@@ -300,8 +324,8 @@ func (l *live) SummarySnapshot() summarizer.Snapshot {
 // PublishSummary は自動要約の結果を反映する (summarizer.Source)。
 //
 // 基準の版が進んでいれば反映せず、呼び出し側に読み直させる。
-func (l *live) PublishSummary(topic, summary string, appliedThrough, base int) error {
-	b := board.Board{Topic: topic, Summary: summary, AppliedThrough: appliedThrough}
+func (l *live) PublishSummary(title, topic, summary string, appliedThrough, base int) error {
+	b := board.Board{Title: title, Topic: topic, Summary: summary, AppliedThrough: appliedThrough}
 	saved, err := l.boards.PublishIfVersion(b, time.Now(), base)
 	if err != nil {
 		if errors.Is(err, board.ErrVersionConflict) {

@@ -31,7 +31,8 @@ type Snapshot struct {
 	Lines []Line
 	// Total は確定行の総数。
 	Total int
-	// Topic / Summary は現在の会議ボード。
+	// Title / Topic / Summary は現在の会議ボード。
+	Title   string
 	Topic   string
 	Summary string
 	// AppliedThrough は反映済みの位置。
@@ -46,7 +47,8 @@ type Source interface {
 	SummarySnapshot() Snapshot
 	// PublishSummary は版が base のままなら会議ボードを差し替える。
 	// 版が進んでいれば ErrVersionConflict を返す。
-	PublishSummary(topic, summary string, appliedThrough, base int) error
+	// title が空なら現在のタイトルを保つ。
+	PublishSummary(title, topic, summary string, appliedThrough, base int) error
 }
 
 // Config はワーカーの設定値。
@@ -261,6 +263,7 @@ func (w *Worker) runOnce(ctx context.Context, final bool) {
 	w.mu.Unlock()
 
 	out, err := w.provider.Summarize(ctx, Input{
+		Title:    snap.Title,
 		Topic:    snap.Topic,
 		Summary:  snap.Summary,
 		NewLines: snap.Lines,
@@ -281,7 +284,11 @@ func (w *Worker) runOnce(ctx context.Context, final bool) {
 	if topic == "" {
 		topic = snap.Topic // 話題が返らなければ前の値を保つ
 	}
-	if err := w.src.PublishSummary(topic, out.Summary, applied, snap.Version); err != nil {
+	title := strings.TrimSpace(out.Title)
+	if title == "" {
+		title = snap.Title // タイトルが返らなければ前の値を保つ
+	}
+	if err := w.src.PublishSummary(title, topic, out.Summary, applied, snap.Version); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
 			// 手動公開が入った。次の回で読み直す。
 			w.mu.Lock()

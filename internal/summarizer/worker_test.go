@@ -22,6 +22,7 @@ type fakeSource struct {
 	lastBase  int
 	// conflictOnce を立てると次の公開だけ版ずれにする。
 	conflictOnce bool
+	title        string
 }
 
 func (s *fakeSource) SummarySnapshot() Snapshot {
@@ -34,6 +35,7 @@ func (s *fakeSource) SummarySnapshot() Snapshot {
 	return Snapshot{
 		Lines:          append([]Line(nil), s.lines[from:]...),
 		Total:          len(s.lines),
+		Title:          s.title,
 		Topic:          s.topic,
 		Summary:        s.summary,
 		AppliedThrough: from,
@@ -41,7 +43,7 @@ func (s *fakeSource) SummarySnapshot() Snapshot {
 	}
 }
 
-func (s *fakeSource) PublishSummary(topic, summary string, applied, base int) error {
+func (s *fakeSource) PublishSummary(title, topic, summary string, applied, base int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastBase = base
@@ -53,7 +55,7 @@ func (s *fakeSource) PublishSummary(topic, summary string, applied, base int) er
 	if base != s.version {
 		return ErrVersionConflict
 	}
-	s.topic, s.summary, s.applied = topic, summary, applied
+	s.title, s.topic, s.summary, s.applied = title, topic, summary, applied
 	s.version++
 	s.published++
 	return nil
@@ -467,4 +469,33 @@ func waitFor(t *testing.T, limit time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("条件が %v 以内に満たされなかった", limit)
+}
+
+// AI が返したタイトルを会議ボードへ渡し、返らなければ前の値を保つこと。
+func TestTitlePassedThroughAndKept(t *testing.T) {
+	src := &fakeSource{}
+	src.addLines(3)
+	p := &fakeProvider{out: Output{Title: "予算見直し", Topic: "x", Summary: "・y"}}
+	w := New(src, p, testConfig())
+	w.runOnce(context.Background(), false)
+	if src.title != "予算見直し" {
+		t.Fatalf("タイトルが渡らない: %q", src.title)
+	}
+
+	src.addLines(3)
+	p.out = Output{Topic: "x", Summary: "・y ・z"}
+	w.runOnce(context.Background(), false)
+	if src.title != "予算見直し" {
+		t.Fatalf("タイトルが返らないとき前の値を保たない: %q", src.title)
+	}
+}
+
+// プロンプトがタイトルを求め、現在のタイトルを渡すこと。
+func TestPromptAsksForTitle(t *testing.T) {
+	got := BuildPrompt(Input{Title: "週次定例", Topic: "t", Summary: "・s"})
+	for _, want := range []string{`"title"`, "title: 週次定例"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("プロンプトに %q が無い", want)
+		}
+	}
 }
