@@ -211,8 +211,9 @@ func (p *OllamaProvider) chat(ctx context.Context, messages []map[string]string,
 	if summary {
 		body["format"] = map[string]any{
 			"type": "object", "properties": map[string]any{
+				"title": map[string]string{"type": "string"},
 				"topic": map[string]string{"type": "string"}, "summary": map[string]string{"type": "string"},
-			}, "required": []string{"topic", "summary"}, "additionalProperties": false,
+			}, "required": []string{"title", "topic", "summary"}, "additionalProperties": false,
 		}
 	}
 	data, err := json.Marshal(body)

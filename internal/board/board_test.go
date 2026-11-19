@@ -940,3 +940,18 @@ func TestPublishIfVersionBlocksInterleavedManualPublish(t *testing.T) {
 		t.Errorf("版 = %d, want 3", cur.Version)
 	}
 }
+
+// タイトルを送らない公開 (手動公開) は前のタイトルを保つこと。
+func TestPublishKeepsTitleWhenOmitted(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "m.txt"))
+	if _, err := s.Publish(Board{Title: "予算見直し", Summary: "・a"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Publish(Board{Summary: "・b"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "予算見直し" {
+		t.Fatalf("タイトルが消えた: %q", got.Title)
+	}
+}

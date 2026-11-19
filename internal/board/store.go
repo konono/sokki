@@ -177,6 +177,10 @@ func (s *Store) Publish(b Board, now time.Time) (Board, error) {
 // publishLocked は s.mu を保持した状態で公開する。
 func (s *Store) publishLocked(b Board, now time.Time) (Board, error) {
 	next := b
+	if strings.TrimSpace(next.Title) == "" {
+		// 手動公開 (MCP) はタイトルを送らないことがあるので前の値を保つ。
+		next.Title = s.current.Title
+	}
 	next.Version = s.version + 1
 	next.UpdatedAt = now
 	md := next.Markdown(s.name)
@@ -253,6 +257,28 @@ func (s *Store) publishLocked(b Board, now time.Time) (Board, error) {
 	s.current = next
 	s.version = next.Version
 	return next, nil
+}
+
+// Files は会議ボードとして保存しうるファイルを返す (存在しないものも含む)。
+func (s *Store) Files() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []string{s.mdPath, s.historyPath, s.statePath}
+}
+
+// Relocate は保存ファイルの移動中に公開が割り込まないよう s.mu を保持して
+// move を呼び、返された文字起こしパスに保存先を合わせる。
+// move には同じロック内で読んだ現在の会議ボードを渡す
+// (ロック外で読むと、移動までの間に公開されたタイトルとずれるため)。
+func (s *Store) Relocate(move func(cur Board) (string, error)) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path, err := move(s.current)
+	if path != "" {
+		next := NewStore(path)
+		s.mdPath, s.historyPath, s.statePath = next.mdPath, next.historyPath, next.statePath
+	}
+	return path, err
 }
 
 // renameFile は置き換えに使う (テストで失敗を注入できるようにする)。

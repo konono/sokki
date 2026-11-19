@@ -25,7 +25,8 @@ type Line struct {
 
 // Input は Provider に渡す材料。
 type Input struct {
-	// Topic / Summary は現在の会議ボード。
+	// Title / Topic / Summary は現在の会議ボード。
+	Title   string
 	Topic   string
 	Summary string
 	// NewLines は未反映の確定発言。
@@ -38,6 +39,8 @@ type Input struct {
 
 // Output は Provider が返す新しい会議ボード。
 type Output struct {
+	// Title は会議全体を表す短いタイトル (保存ファイル名に使う)。
+	Title   string `json:"title,omitempty"`
 	Topic   string `json:"topic"`
 	Summary string `json:"summary"`
 }

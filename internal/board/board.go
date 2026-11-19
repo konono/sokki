@@ -17,6 +17,8 @@ import (
 
 // Board は会議ボード全体。AI が毎回まるごと送る。
 type Board struct {
+	// Title は会議全体を表す短いタイトル。終了時に保存ファイル名へ使う。
+	Title string `json:"title,omitempty"`
 	// Topic は今話していること。話題が変われば更新する。
 	Topic string `json:"topic,omitempty"`
 	// Summary は累積した要約の全文。AI が追加・統合・訂正する。
@@ -168,6 +170,9 @@ func (b *Board) LinesFor(autoSummary bool) []string {
 func (b *Board) Markdown(meetingName string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# %s 会議ボード\n\n", meetingName)
+	if s := strings.TrimSpace(b.Title); s != "" {
+		fmt.Fprintf(&sb, "- タイトル: %s\n", s)
+	}
 	fmt.Fprintf(&sb, "- 版: %d\n", b.Version)
 	if !b.UpdatedAt.IsZero() {
 		fmt.Fprintf(&sb, "- 更新: %s\n", b.UpdatedAt.Format("2006-01-02 15:04:05"))

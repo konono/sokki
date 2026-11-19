@@ -313,6 +313,24 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 		translator.Close()
 	}
 
+	// 自動要約が付けた会議タイトルを保存ファイル名に加える
+	// (日付だけでは中身が分からないため)。書き出しが全て終わってから行う。
+	savedPath := writer.Path()
+	if closeErr == nil {
+		newPath, err := lv.renameByTitle()
+		if err != nil {
+			con.Warn("会議タイトルをファイル名に付けられませんでした: %v", err)
+		}
+		if newPath != savedPath {
+			savedPath = newPath
+			if rec != nil {
+				rec.TranscriptPath = absPath(newPath)
+				rec.BoardPath = absPath(boards.MarkdownPath())
+				rec.HistoryPath = absPath(boards.HistoryPath())
+			}
+		}
+	}
+
 	con.Info("%s", "----------------------------------------")
 	con.Info("録音を終了しました (%s)", transcript.FormatOffset(end.Sub(start)))
 	con.Info("確定行数     : %d", writer.Count())
@@ -332,7 +350,7 @@ func Run(ctx context.Context, cfg config.Config, con *ui.Console) error {
 			con.Warn("ASR 診断の保存に失敗しました: %v", err)
 		}
 	}
-	con.Info("保存先       : %s", writer.Path())
+	con.Info("保存先       : %s", savedPath)
 
 	if closeErr != nil {
 		return fmt.Errorf("保存先ファイルを閉じられませんでした: %w", closeErr)

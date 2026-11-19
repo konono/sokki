@@ -14,7 +14,7 @@ func BuildPrompt(in Input) string {
 	b.WriteString("あなたは会議の書記です。会議の文字起こしを読み、会議ボードを更新します。\n\n")
 	b.WriteString("## 出力形式 (厳守)\n\n")
 	b.WriteString("次の JSON オブジェクトだけを出力してください。説明文やコードブロックは付けないでください。\n\n")
-	b.WriteString("{\"topic\": \"今話していること\", \"summary\": \"累積した要約の全文\"}\n\n")
+	b.WriteString("{\"title\": \"会議全体のタイトル\", \"topic\": \"今話していること\", \"summary\": \"累積した要約の全文\"}\n\n")
 
 	b.WriteString("## 要約の書き方\n\n")
 	b.WriteString("- 固定の分類 (決定 / 宿題 / 未決 など) に振り分けないでください。\n")
@@ -28,6 +28,7 @@ func BuildPrompt(in Input) string {
 	b.WriteString("- 既存の会議ボードは過去にAIが作った下書きで、事実の証拠ではありません。新しい発言と矛盾する記述は、新しい発言を優先して削除・訂正してください。\n")
 	b.WriteString("- 国名・組織名・人名は発言で確認できるものだけ使ってください。同じ話題について新しい発言が別の固有名詞を示したら、以前の固有名詞を維持せず訂正してください。不明なら断定を避けてください。\n")
 	b.WriteString("- topic は今話している話題を短く書き、話題が変わったら更新してください。\n")
+	b.WriteString("- title は会議全体の主題を表す短い名詞句 (20 文字程度、記号や日付を含めない) にしてください。保存ファイル名に使います。今の話題だけでなく会議全体を表し、主題が明確になるまでは既存の title を保ってください。\n")
 	if in.MaxChars > 0 {
 		fmt.Fprintf(&b, "- summary は重複や細部を圧縮し、全体で %d 文字程度を目安にしてください。過去の重要な論点を消してまで短くしないでください。\n", in.MaxChars)
 	}
@@ -44,6 +45,7 @@ func BuildPrompt(in Input) string {
 	if strings.TrimSpace(in.Topic) == "" && strings.TrimSpace(in.Summary) == "" {
 		b.WriteString("(まだありません。最初の要約を作ってください)\n\n")
 	} else {
+		fmt.Fprintf(&b, "title: %s\n\n", strings.TrimSpace(in.Title))
 		fmt.Fprintf(&b, "topic: %s\n\n", strings.TrimSpace(in.Topic))
 		b.WriteString("summary:\n")
 		b.WriteString(strings.TrimSpace(in.Summary))
